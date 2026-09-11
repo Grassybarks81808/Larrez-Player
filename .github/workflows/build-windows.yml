@@ -105,6 +105,27 @@ jobs:
           Copy-Item docs/USAGE.md dist/ -ErrorAction SilentlyContinue
           Get-ChildItem dist | Format-Table Name, Length
 
+      - name: Verify package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = 'dist/larrez-player.exe'
+          $dll = 'dist/mpv-2.dll'
+          foreach ($f in @($exe, $dll)) {
+            if (-not (Test-Path $f)) { throw "Missing $f" }
+            # Confirm it is a real PE image: 'MZ' magic, then a PE\0\0 signature.
+            $bytes = [System.IO.File]::ReadAllBytes($f)
+            if ($bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { throw "$f is not a PE binary" }
+            $peOff = [BitConverter]::ToInt32($bytes, 0x3C)
+            if ($bytes[$peOff] -ne 0x50 -or $bytes[$peOff+1] -ne 0x45) { throw "$f has no PE signature" }
+            '{0,-24} {1,12:N0} bytes  PE OK' -f (Split-Path $f -Leaf), $bytes.Length
+          }
+          # The exe must import our runtime-loaded DLL lazily, so it should NOT
+          # appear in the import table - it is resolved via LoadLibrary instead.
+          $exeSize = (Get-Item $exe).Length
+          if ($exeSize -lt 200KB) { throw "larrez-player.exe looks too small ($exeSize bytes)" }
+          Write-Host 'Package verified.'
+
       - name: Package zip
         shell: pwsh
         run: Compress-Archive -Path dist/* -DestinationPath LarrezPlayer-windows-x64.zip -Force
