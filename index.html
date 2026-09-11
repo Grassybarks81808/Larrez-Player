@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Larrez Player</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f1115'/%3E%3Cpath d='M13 9l11 7-11 7z' fill='%23ff8a3d'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <aside id="sidebar">
+        <header class="brand">
+          <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
+            <rect width="32" height="32" rx="7" fill="#171a21" />
+            <path d="M12 8.5l12 7.5-12 7.5z" fill="#ff8a3d" />
+          </svg>
+          <div class="brand-text">
+            <strong>Larrez</strong>
+            <span>Player</span>
+          </div>
+        </header>
+
+        <div class="side-actions">
+          <button id="btn-open" class="btn primary">Open files</button>
+          <button id="btn-open-folder" class="btn">Open folder</button>
+          <button id="btn-open-url" class="btn">Open URL / stream</button>
+        </div>
+
+        <div class="playlist-head">
+          <span>Playlist</span>
+          <div class="playlist-head-actions">
+            <button id="btn-shuffle" class="chip" title="Shuffle (S)">Shuffle</button>
+            <button id="btn-repeat" class="chip" title="Repeat (R)">Repeat: off</button>
+            <button id="btn-clear" class="chip danger" title="Clear playlist">Clear</button>
+          </div>
+        </div>
+
+        <ul id="playlist" class="playlist"></ul>
+
+        <footer class="side-foot">
+          <div id="perf" class="perf">idle</div>
+        </footer>
+      </aside>
+
+      <main id="stage">
+        <div id="dropzone" class="dropzone">
+          <div class="dz-inner">
+            <svg class="dz-logo" viewBox="0 0 32 32" aria-hidden="true">
+              <rect width="32" height="32" rx="7" fill="#171a21" />
+              <path d="M12 8.5l12 7.5-12 7.5z" fill="#ff8a3d" />
+            </svg>
+            <h1>Larrez Player</h1>
+            <p>Drop video files or a folder here, or use <b>Open files</b>.</p>
+            <p class="muted">
+              Native: MP4 · WebM · MKV(VP9/AV1) · MOV · M4V · OGV — plus HLS/DASH URLs.
+            </p>
+          </div>
+        </div>
+
+        <video id="video" playsinline preload="metadata"></video>
+
+        <div id="toast" class="toast" hidden></div>
+
+        <div id="controls" class="controls">
+          <div class="seek-row">
+            <span id="time-cur" class="time">0:00</span>
+            <div id="seek" class="seek" role="slider" tabindex="0"
+                 aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div class="seek-track">
+                <div id="seek-buffer" class="seek-buffer"></div>
+                <div id="seek-fill" class="seek-fill"></div>
+                <div id="seek-knob" class="seek-knob"></div>
+              </div>
+              <div id="seek-tip" class="seek-tip" hidden>0:00</div>
+            </div>
+            <span id="time-dur" class="time">0:00</span>
+          </div>
+
+          <div class="btn-row">
+            <button id="btn-prev" class="ctl" title="Previous (P)">⏮</button>
+            <button id="btn-back" class="ctl" title="Back 10s (J)">⏪</button>
+            <button id="btn-play" class="ctl play" title="Play / Pause (Space)">▶</button>
+            <button id="btn-fwd" class="ctl" title="Forward 10s (L)">⏩</button>
+            <button id="btn-next" class="ctl" title="Next (N)">⏭</button>
+
+            <div class="vol">
+              <button id="btn-mute" class="ctl" title="Mute (M)">🔊</button>
+              <input id="volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume" />
+            </div>
+
+            <div id="now-playing" class="now-playing">Nothing loaded</div>
+
+            <div class="spacer"></div>
+
+            <label class="sel">
+              Speed
+              <select id="speed" aria-label="Playback speed">
+                <option value="0.25">0.25×</option>
+                <option value="0.5">0.5×</option>
+                <option value="0.75">0.75×</option>
+                <option value="1" selected>1×</option>
+                <option value="1.25">1.25×</option>
+                <option value="1.5">1.5×</option>
+                <option value="2">2×</option>
+                <option value="4">4×</option>
+              </select>
+            </label>
+
+            <label class="sel" id="audio-wrap" hidden>
+              Audio
+              <select id="audio-track" aria-label="Audio track"></select>
+            </label>
+
+            <label class="sel" id="sub-wrap" hidden>
+              Subs
+              <select id="sub-track" aria-label="Subtitle track"></select>
+            </label>
+
+            <button id="btn-sub-add" class="ctl" title="Load subtitle file (.vtt/.srt)">＋Sub</button>
+            <button id="btn-snap" class="ctl" title="Snapshot frame (C)">📷</button>
+            <button id="btn-pip" class="ctl" title="Picture in picture (I)">⧉</button>
+            <button id="btn-full" class="ctl" title="Fullscreen (F)">⛶</button>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <input id="file-input" type="file" accept="video/*,.mkv,.avi,.mov,.ts,.m4v,.webm,.ogv,.flv,.wmv" multiple hidden />
+    <input id="folder-input" type="file" webkitdirectory directory multiple hidden />
+    <input id="sub-input" type="file" accept=".vtt,.srt" hidden />
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
