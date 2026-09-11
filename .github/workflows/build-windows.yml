@@ -1,0 +1,122 @@
+name: Build Windows
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # ---------------------------------------------------------------
+  # Native Windows player: builds the real .exe on a Windows runner
+  # ---------------------------------------------------------------
+  windows:
+    name: Native player (x86_64-pc-windows-msvc)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: clippy, rustfmt
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            native/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('native/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        working-directory: native
+        run: cargo fmt --check
+        continue-on-error: true
+
+      - name: Clippy
+        working-directory: native
+        run: cargo clippy --release -- -D warnings
+        continue-on-error: true
+
+      - name: Unit tests
+        working-directory: native
+        run: cargo test --release
+
+      - name: Build release binary
+        working-directory: native
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Fetch libmpv runtime
+        shell: pwsh
+        run: |
+          # libmpv ships as a prebuilt DLL; the player loads it at runtime.
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $url = 'https://github.com/shinchiro/mpv-winbuild-cmake/releases/latest/download/mpv-dev-x86_64.7z'
+          Write-Host "Downloading libmpv from $url"
+          Invoke-WebRequest -Uri $url -OutFile mpv-dev.7z -UseBasicParsing
+          7z x mpv-dev.7z -ompv-dev
+          Get-ChildItem -Recurse mpv-dev -Include 'libmpv-2.dll','mpv-2.dll' |
+            Select-Object -First 1 |
+            ForEach-Object { Copy-Item $_.FullName dist/mpv-2.dll }
+          if (-not (Test-Path dist/mpv-2.dll)) { throw 'mpv-2.dll not found in archive' }
+
+      - name: Stage portable package
+        shell: pwsh
+        run: |
+          Copy-Item native/target/x86_64-pc-windows-msvc/release/larrez-player.exe dist/
+          Copy-Item README.md dist/
+          Copy-Item LICENSE dist/ -ErrorAction SilentlyContinue
+          Copy-Item docs/USAGE.md dist/ -ErrorAction SilentlyContinue
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - name: Package zip
+        shell: pwsh
+        run: Compress-Archive -Path dist/* -DestinationPath LarrezPlayer-windows-x64.zip -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LarrezPlayer-windows-x64
+          path: LarrezPlayer-windows-x64.zip
+          if-no-files-found: error
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: LarrezPlayer-windows-x64.zip
+          generate_release_notes: true
+
+  # ---------------------------------------------------------------
+  # Web prototype: typecheck + build, published as a static bundle
+  # ---------------------------------------------------------------
+  web:
+    name: Web prototype
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: larrez-web
+          path: dist

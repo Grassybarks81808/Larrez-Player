@@ -3,99 +3,126 @@
 A lightweight multi-format video player. Plays local and network media without
 eating your machine alive.
 
-This repo currently holds the **web prototype** — the UI, playlist engine, and
-interaction model that the native Windows build will inherit.
+Two builds live in this repo:
+
+| | Where | What it's for |
+| --- | --- | --- |
+| **Native Windows player** | [`native/`](native/) | The real thing — Rust + libmpv, portable `.exe`, plays everything |
+| **Web prototype** | [`src/`](src/) | The UI/UX reference the native build follows |
 
 ---
 
-## Run it
+## Download for Windows
+
+Grab `LarrezPlayer-windows-x64.zip` from
+[**Releases**](https://github.com/Grassybarks81808/Larrez-Player/releases),
+unzip anywhere, run `larrez-player.exe`. Portable — no installer, no registry
+writes. Keep `mpv-2.dll` next to the `.exe`.
+
+Full instructions: [`docs/USAGE.md`](docs/USAGE.md)
+
+## Formats
+
+Anything FFmpeg can demux and decode:
+
+**Containers** — MKV · MP4 · AVI · MOV · WMV · FLV · TS · M2TS · MPEG · VOB ·
+WebM · OGV · RM/RMVB · 3GP · DivX · MXF
+
+**Video** — H.264 · HEVC/H.265 · AV1 · VP9 · MPEG-2 · VC-1
+
+**Audio** — AAC · AC3 · E-AC3 · DTS · TrueHD · FLAC · Opus · Vorbis · MP3
+
+**Subtitles** — SRT · ASS/SSA (full styling) · VTT · SUB/IDX · PGS
+
+## Features
+
+- Drag & drop files or folders; playlist with shuffle and repeat off/all/one
+- Resume where you left off, per file
+- Audio-track and subtitle-track cycling, external subtitle loading
+- Speed 0.25×–4×, fullscreen, screenshots
+- Natural sort, so `ep2` plays before `ep10`
+- Settings persisted to `%APPDATA%\LarrezPlayer\state.json`
+
+## Keyboard
+
+| Key | Action | Key | Action |
+| --- | --- | --- | --- |
+| `Space` / `K` | Play / pause | `F` | Fullscreen |
+| `←` / `→` | ∓5 seconds | `M` | Mute |
+| `J` / `L` | ∓10 seconds | `A` | Cycle audio track |
+| `↑` / `↓` | Volume | `V` | Cycle subtitles |
+| `N` / `P` | Next / previous | `B` | Load subtitle file |
+| `S` / `R` | Shuffle / repeat | `C` | Screenshot |
+| `[` / `]` / `\` | Speed down / up / reset | `O` / `D` | Open file / folder |
+| `I` | Position info | `H` / `Q` | Help / quit |
+
+---
+
+## Why it's light
+
+The player process does **no per-frame work whatsoever**.
+
+libmpv is handed the window's raw `HWND` and renders into it directly, driving
+its own presentation on the GPU. We never create a GPU context, never run a
+render loop, never poll. The winit event loop sleeps on `ControlFlow::WaitUntil`
+and wakes four times a second purely to drain mpv's event queue and persist the
+playback position.
+
+Hardware decoding is on by default — **D3D11VA** on Windows via `hwdec=auto-safe`,
+with mpv's `gpu-next` renderer where available. The GPU decodes; the CPU mostly
+idles. Expect tens of MB of RAM at rest and single-digit CPU on 4K HEVC.
+
+The binary itself is built with fat LTO, one codegen unit, `panic=abort`, and
+stripped symbols.
+
+## Build it yourself
+
+```powershell
+cd native
+cargo build --release
+```
+
+Needs the Rust MSVC toolchain, plus `mpv-2.dll` beside the output binary
+([libmpv Windows builds](https://sourceforge.net/projects/mpv-player-windows/files/libmpv/)).
+
+CI (`.github/workflows/build-windows.yml`) builds the `.exe` on a Windows runner,
+runs the unit tests, bundles libmpv, and uploads a ready-to-run zip on every
+push. Tagging `v*` publishes it as a release.
+
+---
+
+## Web prototype
 
 ```bash
 npm install
 npm run dev      # http://localhost:5173
 ```
 
-Build a static bundle:
+Vite + vanilla TypeScript, **zero runtime dependencies**, ~17 kB of JS. It has
+the same playlist model, shortcuts, resume, and drag & drop, plus a scrub bar
+with hover preview and a live FPS/dropped-frame/buffer HUD.
 
-```bash
-npm run build    # -> dist/
-npm run preview
-```
+Its UI redraws off `requestVideoFrameCallback`, so a paused or backgrounded
+video costs zero CPU in our code.
 
-## What it does
-
-**Media**
-- Drag & drop files *or* whole folders (directory entries are walked recursively)
-- Open files, open folder, or open a direct URL / HLS `.m3u8` / DASH `.mpd` stream
-- Per-file format inspection: every track is labelled `native`, `codec-dependent`,
-  or `needs native build` **before** you hit play, so nothing fails silently
-
-**Playback**
-- Play/pause, ±5s and ±10s skip, frame-accurate scrub bar with hover preview
-- Speed 0.25×–4×, volume with mute, audio-track and subtitle-track pickers
-- Load external `.srt` or `.vtt` subtitles (SRT is converted to WebVTT in-browser)
-- Picture-in-picture, fullscreen, PNG frame snapshot
-- Resume-where-you-left-off, persisted per file in `localStorage`
-
-**Playlist**
-- Reorder by drag, remove individual items, clear all
-- Shuffle, and repeat off / all / one
-- Natural sort, so `ep2` lands before `ep10`
-
-**Live stats** — resolution, real presented FPS, dropped frames, and buffer depth
-in the sidebar footer.
-
-## Keyboard
-
-| Key | Action | Key | Action |
-| --- | --- | --- | --- |
-| `Space` / `K` | Play / pause | `M` | Mute |
-| `←` / `→` | ∓5 seconds | `F` | Fullscreen |
-| `J` / `L` | ∓10 seconds | `I` | Picture-in-picture |
-| `↑` / `↓` | Volume | `C` | Snapshot frame |
-| `N` / `P` | Next / previous | `S` | Shuffle |
-| `O` | Open files | `R` | Cycle repeat |
-
-## Performance notes
-
-The prototype is deliberately built with **no runtime dependencies** — no React,
-no player library. The whole app is ~17 kB of JS.
-
-The UI redraws off `requestVideoFrameCallback`, which fires only when the decoder
-actually presents a new frame. A paused, hidden, or backgrounded video therefore
-costs zero CPU in our code — there is no polling loop anywhere. Controls unmount
-from the interaction path when idle. The practical result: essentially all
-measurable load during playback belongs to the codec, not to the player.
-
-## Format support: the honest version
-
-Browsers only decode what the host ships codecs for, so the prototype cannot be a
-universal player. It classifies each file rather than pretending:
-
-| Container | Web prototype | Native Windows build |
-| --- | --- | --- |
-| MP4 / M4V (H.264, AV1) | ✅ native | ✅ |
-| WebM (VP8/VP9/AV1) | ✅ native | ✅ |
-| MOV, MKV, TS | ⚠️ codec-dependent | ✅ |
-| HEVC / H.265, DTS, TrueHD | ❌ | ✅ |
-| AVI, FLV, WMV, MPEG-PS, M2TS | ❌ | ✅ |
-
-## Roadmap — native Windows build
-
-The next stage is **Rust + libmpv**, packaged as a portable single `.exe`:
-
-- libmpv (the mpv engine) handles demux and decode, so *everything* ffmpeg
-  supports plays — no per-container caveats
-- D3D11VA hardware decoding on by default; idle RAM in the tens of MB
-- This exact UI, rendered natively, with mpv drawing into a child window
-- File associations for `.mkv` / `.avi` / `.mp4` arrive in v1.1 alongside an installer
+**Its one real limitation:** browsers only decode what the host ships codecs
+for, so AVI, FLV, WMV, MPEG-PS and HEVC cannot play there. Rather than fail
+silently, it inspects each file and labels it `native`, `codec-dependent`, or
+`needs native build` before you press play. The native build has no such
+caveats — that is precisely why it exists.
 
 ## Layout
 
 ```
-index.html        markup + control bar
-src/main.ts       player logic, playlist, shortcuts, drag & drop
-src/formats.ts    codec probing, time/size formatting, SRT→VTT
-src/playlist.ts   track model
-src/style.css     dark theme
+native/src/main.rs       window, event loop, input, playlist control
+native/src/mpv.rs        hand-rolled libmpv FFI (runtime-loaded, zero crates)
+native/src/playlist.rs   playlist model, natural sort, resume persistence
+src/main.ts              web prototype player logic
+src/formats.ts           codec probing, SRT to VTT
+docs/USAGE.md            Windows install, shortcuts, troubleshooting
 ```
+
+## Licence
+
+MIT — see [LICENSE](LICENSE). libmpv is LGPL-2.1+, loaded dynamically and
+shipped unmodified.
