@@ -369,7 +369,7 @@ fn name_of(p: &std::path::Path) -> String {
 fn window_id(window: &winit::window::Window) -> Result<i64, String> {
     match window.raw_window_handle() {
         #[cfg(windows)]
-        RawWindowHandle::Win32(h) => Ok(h.hwnd as i64),
+        RawWindowHandle::Win32(h) => Ok(h.hwnd as isize as i64),
         #[cfg(not(windows))]
         RawWindowHandle::Xlib(h) => Ok(h.window as i64),
         #[cfg(not(windows))]

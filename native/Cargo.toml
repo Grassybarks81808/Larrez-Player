@@ -13,7 +13,7 @@ path = "src/main.rs"
 [dependencies]
 # Windowing + input. We hand mpv the raw HWND and let it render itself,
 # so we never touch a GPU context ourselves.
-winit = "0.29"
+winit = { version = "0.29", features = ["rwh_05"] }
 raw-window-handle = "0.5"
 rfd = "0.14"
 serde = { version = "1", features = ["derive"] }
