@@ -57,18 +57,44 @@ jobs:
 
       - name: Fetch libmpv runtime
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # libmpv ships as a prebuilt DLL; the player loads it at runtime.
+          # libmpv ships as a prebuilt DLL; the player dlopen()s it at runtime.
+          # Asset names carry a date stamp, so resolve the newest one via the API.
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          $url = 'https://github.com/shinchiro/mpv-winbuild-cmake/releases/latest/download/mpv-dev-x86_64.7z'
-          Write-Host "Downloading libmpv from $url"
-          Invoke-WebRequest -Uri $url -OutFile mpv-dev.7z -UseBasicParsing
-          7z x mpv-dev.7z -ompv-dev
-          Get-ChildItem -Recurse mpv-dev -Include 'libmpv-2.dll','mpv-2.dll' |
-            Select-Object -First 1 |
-            ForEach-Object { Copy-Item $_.FullName dist/mpv-2.dll }
-          if (-not (Test-Path dist/mpv-2.dll)) { throw 'mpv-2.dll not found in archive' }
+
+          $asset = $null
+          try {
+            $releases = gh api 'repos/shinchiro/mpv-winbuild-cmake/releases?per_page=15' | ConvertFrom-Json
+            $asset = $releases |
+              ForEach-Object { $_.assets } |
+              Where-Object { $_.name -match '^mpv-dev-x86_64-\d{8}-git-[0-9a-f]+\.7z$' } |
+              Select-Object -First 1
+          } catch {
+            Write-Warning "GitHub API lookup failed: $_"
+          }
+
+          if ($asset) {
+            Write-Host "Downloading $($asset.name)"
+            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile mpv-dev.7z -UseBasicParsing
+          } else {
+            Write-Host 'Falling back to SourceForge libmpv build'
+            $sf = 'https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-x86_64-20240107-git-a0fba7b.7z/download'
+            Invoke-WebRequest -Uri $sf -OutFile mpv-dev.7z -UseBasicParsing -UserAgent 'Mozilla/5.0'
+          }
+
+          7z x mpv-dev.7z -ompv-dev | Out-Null
+          $dll = Get-ChildItem -Recurse mpv-dev -Include 'libmpv-2.dll','mpv-2.dll','mpv-1.dll' |
+                 Select-Object -First 1
+          if (-not $dll) {
+            Write-Host 'Archive contents:'
+            Get-ChildItem -Recurse mpv-dev | Select-Object FullName
+            throw 'No libmpv DLL found in archive'
+          }
+          Copy-Item $dll.FullName dist/mpv-2.dll
+          Write-Host "Bundled $($dll.Name) as mpv-2.dll ($((Get-Item dist/mpv-2.dll).Length) bytes)"
 
       - name: Stage portable package
         shell: pwsh
