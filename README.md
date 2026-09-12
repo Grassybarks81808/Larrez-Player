@@ -42,6 +42,8 @@ WebM · OGV · RM/RMVB · 3GP · DivX · MXF
 - Speed 0.25×–4×, fullscreen, screenshots
 - Natural sort, so `ep2` plays before `ep10`
 - Settings persisted to `%APPDATA%\LarrezPlayer\state.json`
+- A log of what the video output did, in `%APPDATA%\LarrezPlayer\larrez.log`
+- `--verbose` for the full picture, `--safe-mode` if your GPU paths misbehave
 
 ## Keyboard
 
@@ -85,9 +87,10 @@ cargo build --release
 Needs the Rust MSVC toolchain, plus `mpv-2.dll` beside the output binary
 ([libmpv Windows builds](https://sourceforge.net/projects/mpv-player-windows/files/libmpv/)).
 
-CI (`.github/workflows/build-windows.yml`) builds the `.exe` on a Windows runner,
-runs the unit tests, bundles libmpv, and uploads a ready-to-run zip on every
-push. Tagging `v*` publishes it as a release.
+CI (`.github/workflows/build-windows.yml`) builds the `.exe` on a Windows
+runner, runs the unit tests, bundles libmpv, **launches the packaged app and
+checks that it starts, stays up and shuts down cleanly**, then uploads a
+ready-to-run zip on every push. Tagging `v*` publishes it as a release.
 
 ---
 
@@ -116,11 +119,21 @@ caveats — that is precisely why it exists.
 ```
 native/src/main.rs       window, event loop, input, playlist control
 native/src/mpv.rs        hand-rolled libmpv FFI (runtime-loaded, zero crates)
+native/src/win.rs        Win32 window setup: black background, WS_CLIPCHILDREN
+native/src/logging.rs    log file + panic hook, so failures leave evidence
 native/src/playlist.rs   playlist model, natural sort, resume persistence
 src/main.ts              web prototype player logic
 src/formats.ts           codec probing, SRT to VTT
 docs/USAGE.md            Windows install, shortcuts, troubleshooting
 ```
+
+## When the picture doesn't come
+
+A window with nothing in it is not a crash — it is mpv saying it could not
+start a video output. The player paints that window black (never white), tells
+you what mpv reported, and writes the detail to
+`%APPDATA%\LarrezPlayer\larrez.log`. `--safe-mode` bypasses the hardware
+decoding and `gpu-next` paths if your driver is the problem.
 
 ## Licence
 

@@ -8,51 +8,167 @@
 //!
 //! That is the whole "doesn't use much system resources" story: the codec is
 //! the only meaningful consumer, and it runs on the GPU.
+//!
+//! Two details around mpv are load-bearing:
+//!
+//! * **Startup.** The window is created hidden and painted black before it is
+//!   shown. A window nothing has painted yet is a white rectangle, and if the
+//!   video output fails to start it stays that way — which is what users
+//!   report as a crash. Now the window is black from its first frame, and a
+//!   video output that never arrives is reported instead of ignored.
+//! * **Shutdown.** mpv's video output lives in a child window inside ours and
+//!   leaves Win32 hooks on our window's thread, so it is torn down explicitly
+//!   (see `Event::LoopExiting`) while our window is still alive.
 
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod logging;
 mod mpv;
 mod playlist;
+#[cfg(windows)]
+mod win;
 
-use mpv::Mpv;
+use mpv::{Event as MpvEvent, Mpv, Value};
 use playlist::{fmt_time, is_subtitle, Playlist, Repeat, State};
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
+use std::ffi::OsString;
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use winit::event::{ElementState, Event, KeyEvent, MouseButton, WindowEvent};
+use winit::event::{ElementState, Event as WinitEvent, KeyEvent, MouseButton, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::keyboard::{Key, NamedKey};
-use winit::window::{Fullscreen, WindowBuilder};
+use winit::window::{Fullscreen, Window, WindowBuilder};
 
 const TICK: Duration = Duration::from_millis(250);
+/// How long a file may sit loaded without a picture before we say something.
+const VIDEO_OUTPUT_GRACE: Duration = Duration::from_secs(8);
+
+/// Property ids handed to `mpv_observe_property`. They come back in
+/// `MpvEvent::PropertyChange`, so we ask for exactly what we act on.
+const PROP_VO_CONFIGURED: u64 = 1;
 
 fn main() {
-    if let Err(e) = run() {
-        eprintln!("Larrez Player: {e}");
-        // On Windows with the GUI subsystem there's no console, so surface a dialog.
-        #[cfg(windows)]
-        rfd::MessageDialog::new()
-            .set_title("Larrez Player")
-            .set_description(&e)
-            .set_level(rfd::MessageLevel::Error)
-            .show();
+    let args = parse_args();
+    logging::init(args.verbose);
+    logging::install_panic_hook();
+
+    if let Err(e) = run(&args) {
+        logging::log("fatal", &e);
+        error_dialog(
+            "Larrez Player could not start",
+            &format!("{e}\n\nDetails were written to:\n{}", logging::path_display()),
+        );
         std::process::exit(1);
     }
 }
 
-fn run() -> Result<(), String> {
+#[derive(Debug, Default, PartialEq)]
+struct Args {
+    files: Vec<PathBuf>,
+    verbose: bool,
+    safe_mode: bool,
+}
+
+fn parse_args() -> Args {
+    parse_args_from(std::env::args_os().skip(1))
+}
+
+/// Split out from `parse_args` so it can be tested without touching the
+/// process environment.
+fn parse_args_from<I: IntoIterator<Item = OsString>>(argv: I) -> Args {
+    let mut args = Args::default();
+    for raw in argv {
+        let flag = raw.to_string_lossy().into_owned();
+        match flag.as_str() {
+            "--verbose" | "-v" => args.verbose = true,
+            "--safe-mode" => args.safe_mode = true,
+            "--version" | "-V" => {
+                announce(&format!("Larrez Player {}", env!("CARGO_PKG_VERSION")));
+                std::process::exit(0);
+            }
+            "--help" | "-h" | "/?" => {
+                announce(HELP);
+                std::process::exit(0);
+            }
+            _ => args.files.push(PathBuf::from(raw)),
+        }
+    }
+    args
+}
+
+/// Show text to the user. A GUI process has no console attached, so printing
+/// alone would leave `--help` looking like the app simply did nothing.
+fn announce(text: &str) {
+    // A GUI process has no console, so a failed write must not be fatal.
+    let _ = writeln!(std::io::stdout(), "{text}");
+    rfd::MessageDialog::new()
+        .set_title("Larrez Player")
+        .set_description(text)
+        .show();
+}
+
+fn error_dialog(title: &str, text: &str) {
+    rfd::MessageDialog::new()
+        .set_title(title)
+        .set_description(text)
+        .set_level(rfd::MessageLevel::Error)
+        .show();
+}
+
+fn run(args: &Args) -> Result<(), String> {
     let mut state = State::load();
 
+    // Breadcrumbs. An access violation takes the process down without a
+    // whisper otherwise, and the last line in the log is what names the step
+    // that did it.
+    logging::log("info", "startup: creating the event loop");
     let event_loop = EventLoop::new().map_err(|e| e.to_string())?;
+    logging::log("info", "startup: event loop ready");
+
+    // Built hidden on purpose: winit registers its window class without a
+    // background brush, so a window that is shown before anything paints it is
+    // a white rectangle. We make it black and hand it to mpv first, and only
+    // then put it on screen.
+    logging::log("info", "startup: creating the window");
     let window = WindowBuilder::new()
         .with_title("Larrez Player")
         .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 720.0))
         .with_min_inner_size(winit::dpi::LogicalSize::new(480.0, 300.0))
+        .with_visible(false)
         .build(&event_loop)
         .map_err(|e| e.to_string())?;
 
+    logging::log("info", "startup: window created");
+    #[cfg(windows)]
+    {
+        let hwnd = win::hwnd_of(&window)?;
+        win::prepare_video_window(hwnd)?;
+        logging::log("info", "startup: window prepared for video");
+    }
+
     let wid = window_id(&window)?;
-    let player = Mpv::new(wid)?;
+    logging::log("info", &format!("startup: window id 0x{wid:X}, loading libmpv"));
+    let mut player = Mpv::new(
+        wid,
+        mpv::Config {
+            verbose: args.verbose,
+            safe_mode: args.safe_mode,
+        },
+    )?;
+    logging::log(
+        "info",
+        &format!("startup: mpv ready, embedding in window 0x{wid:X}"),
+    );
+    if args.safe_mode {
+        logging::log("info", "safe mode: hardware decoding off, plain GPU path");
+    }
+
+    // mpv tells us when a video output is actually up. We use that to report
+    // the failure case, rather than leaving a blank window behind.
+    if let Err(e) = player.observe(PROP_VO_CONFIGURED, "vo-configured", mpv::MPV_FORMAT_FLAG) {
+        logging::log("warn", &format!("could not watch vo-configured: {e}"));
+    }
 
     // Apply persisted preferences.
     let _ = player.set_double("volume", state.volume);
@@ -70,9 +186,8 @@ fn run() -> Result<(), String> {
     };
 
     // Files passed on the command line (this is what file associations use).
-    let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
-    if !args.is_empty() {
-        pl.add_paths(&args);
+    if !args.files.is_empty() {
+        pl.add_paths(&args.files);
         if !pl.items.is_empty() {
             open_index(&player, &mut pl, &state, 0);
         }
@@ -80,16 +195,32 @@ fn run() -> Result<(), String> {
         player.show_text("Larrez Player — press O to open a file, H for help");
     }
 
+    // mpv is up; show the window. Anything it has not painted yet is black.
+    window.set_visible(true);
+
+    let started = Instant::now();
+    let mut alive = true;
     let mut fullscreen = false;
     let mut last_save = Instant::now();
+    let mut vo_ready = false;
+    let mut vo_reported = false;
+    let mut loaded_at: Option<Instant> = None;
+    let verbose = args.verbose;
 
     event_loop
         .run(move |event, elwt| {
             elwt.set_control_flow(ControlFlow::WaitUntil(Instant::now() + TICK));
 
+            // Once mpv has been shut down its handle is gone; poking it here
+            // would be use-after-free in the C library.
+            if !alive {
+                return;
+            }
+
             match event {
-                Event::WindowEvent { event, .. } => match event {
+                WinitEvent::WindowEvent { event, .. } => match event {
                     WindowEvent::CloseRequested => {
+                        logging::log("info", "window closed");
                         persist(&player, &mut pl, &mut state);
                         elwt.exit();
                     }
@@ -110,14 +241,22 @@ fn run() -> Result<(), String> {
                         }
                     }
 
-                    WindowEvent::MouseInput { state: st, button, .. } => {
+                    WindowEvent::MouseInput {
+                        state: st, button, ..
+                    } => {
                         if st == ElementState::Pressed && button == MouseButton::Left {
                             player.toggle_pause();
                         }
                     }
 
                     WindowEvent::KeyboardInput {
-                        event: KeyEvent { logical_key, state: ElementState::Pressed, repeat: false, .. },
+                        event:
+                            KeyEvent {
+                                logical_key,
+                                state: ElementState::Pressed,
+                                repeat: false,
+                                ..
+                            },
                         ..
                     } => {
                         handle_key(
@@ -134,13 +273,51 @@ fn run() -> Result<(), String> {
                     _ => {}
                 },
 
-                Event::AboutToWait => {
+                WinitEvent::AboutToWait => {
                     // Drain mpv's event queue.
                     loop {
                         match player.poll_event() {
-                            mpv::MPV_EVENT_NONE => break,
+                            MpvEvent::None => break,
 
-                            mpv::MPV_EVENT_FILE_LOADED => {
+                            MpvEvent::Log(msg) => {
+                                logging::log_mpv(&msg.level, &msg.prefix, &msg.text);
+                                // No picture has ever appeared and mpv is
+                                // telling us why: stop pretending all is well.
+                                if !vo_ready && !vo_reported && video_output_died(&msg.text) {
+                                    vo_reported = true;
+                                    report_no_video_output(msg.text.trim());
+                                }
+                            }
+
+                            MpvEvent::PropertyChange { id, value, .. } if id == PROP_VO_CONFIGURED => {
+                                match value {
+                                    Value::Flag(true) => {
+                                        if !vo_ready {
+                                            vo_ready = true;
+                                            vo_reported = false;
+                                            logging::log(
+                                                "info",
+                                                &format!(
+                                                    "video output ready after {} ms ({})",
+                                                    started.elapsed().as_millis(),
+                                                    player.video_state()
+                                                ),
+                                            );
+                                        }
+                                    }
+                                    Value::Flag(false) => vo_ready = false,
+                                    _ => {}
+                                }
+                            }
+
+                            // We watch exactly one property, so anything
+                            // arriving here is worth a line in a verbose log.
+                            MpvEvent::PropertyChange { name, value, .. } if verbose => {
+                                logging::log("debug", &format!("{name} is now {value:?}"));
+                            }
+
+                            MpvEvent::FileLoaded => {
+                                loaded_at = Some(Instant::now());
                                 if let Some(e) = pl.current_entry() {
                                     window.set_title(&format!("{} — Larrez Player", e.name));
                                     // Apply the saved position now that duration is known.
@@ -151,26 +328,70 @@ fn run() -> Result<(), String> {
                                 }
                             }
 
-                            mpv::MPV_EVENT_END_FILE => {
-                                // Advance, honouring shuffle/repeat.
+                            MpvEvent::EndFile { reason, error } => {
+                                let name = pl.current_entry().map(|e| e.name.clone()).unwrap_or_default();
                                 if let Some(e) = pl.current_entry() {
                                     let p = e.path.clone();
                                     state.remember(&p, 0.0, 1.0); // clear on completion
                                 }
-                                match pl.next_index(true) {
-                                    Some(n) => open_index(&player, &mut pl, &state, n),
-                                    None => player.show_text("End of playlist"),
+
+                                if reason == mpv::MPV_END_FILE_REASON_ERROR {
+                                    // Don't race through the playlist skipping
+                                    // broken files: say which one failed and
+                                    // let the user press N.
+                                    logging::log(
+                                        "error",
+                                        &format!(
+                                            "{name}: playback failed — {} (reason {reason})",
+                                            player.error_text(error)
+                                        ),
+                                    );
+                                    loaded_at = None;
+                                    player.show_text(&format!(
+                                        "Could not play {name} — press N for the next file"
+                                    ));
+                                } else {
+                                    logging::log("info", &format!("finished {name} (reason {reason})"));
+                                    match pl.next_index(true) {
+                                        Some(n) => open_index(&player, &mut pl, &state, n),
+                                        None => player.show_text("End of playlist"),
+                                    }
                                 }
                             }
 
-                            mpv::MPV_EVENT_SHUTDOWN => {
+                            MpvEvent::Shutdown => {
+                                logging::log("info", "mpv asked us to quit");
                                 persist(&player, &mut pl, &mut state);
+                                player.shutdown();
+                                alive = false;
                                 elwt.exit();
                                 break;
                             }
 
+                            MpvEvent::Other(id) if verbose => {
+                                logging::log("debug", &format!("unhandled mpv event {id}"));
+                            }
+
                             _ => {}
                         }
+                    }
+
+                    // If mpv asked us to quit we have already torn it down;
+                    // nothing below may touch its handle again.
+                    if !alive {
+                        return;
+                    }
+
+                    // A file that has been loaded for a while with nothing on
+                    // screen means the video output is not coming. Say it once.
+                    if !vo_ready
+                        && !vo_reported
+                        && loaded_at
+                            .map(|t| t.elapsed() > VIDEO_OUTPUT_GRACE)
+                            .unwrap_or(false)
+                    {
+                        vo_reported = true;
+                        report_no_video_output("no video output after loading a file");
                     }
 
                     // Persist position periodically so a crash doesn't lose it.
@@ -178,6 +399,16 @@ fn run() -> Result<(), String> {
                         last_save = Instant::now();
                         persist(&player, &mut pl, &mut state);
                     }
+                }
+
+                WinitEvent::LoopExiting => {
+                    // mpv's video output is a child window of ours and its Win32
+                    // hooks sit on this thread, so tear it down while the window
+                    // is still alive and before the process starts unwinding.
+                    persist(&player, &mut pl, &mut state);
+                    player.shutdown();
+                    alive = false;
+                    logging::log("info", "shutdown complete");
                 }
 
                 _ => {}
@@ -301,7 +532,39 @@ const HELP: &str = "Larrez Player\n\
 Space/K play-pause   J/L -10s/+10s   arrows seek & volume\n\
 F fullscreen   M mute   A audio track   V subtitles   B load subs\n\
 N/P next-prev   S shuffle   R repeat   [ ] speed   \\ reset speed\n\
-O open file   D open folder   C screenshot   I info   Q quit";
+O open file   D open folder   C screenshot   I info   Q quit\n\
+Start with --verbose to log everything, --safe-mode to avoid GPU paths";
+
+/// Messages from mpv that mean there is never going to be a picture.
+fn video_output_died(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    const FATAL: &[&str] = &[
+        "unable to create window",
+        "video output failed",
+        "could not initialize video output",
+        "could not create video output",
+        "failed to initialize a video output",
+        "error opening/initializing the selected video_out",
+    ];
+    FATAL.iter().any(|f| m.contains(f))
+}
+
+/// A blank window with no explanation is what users (fairly) call a crash, so
+/// spell out what happened once and where the details are.
+fn report_no_video_output(detail: &str) {
+    let detail = detail.trim_end_matches(['\r', '\n']);
+    logging::log("error", &format!("no video output: {detail}"));
+    let text = format!(
+        "Larrez Player could not start its video output.\n\n\
+         mpv said: {detail}\n\n\
+         Details were written to:\n{}\n\n\
+         Worth trying:\n\
+         • update your graphics driver\n\
+         • start the player with --safe-mode (software decoding, plain GPU path)",
+        logging::path_display()
+    );
+    error_dialog("Larrez Player — no video output", &text);
+}
 
 fn adjust_speed(player: &Mpv, state: &mut State, delta: f64) {
     state.speed = (state.speed + delta).clamp(0.25, 4.0);
@@ -311,7 +574,10 @@ fn adjust_speed(player: &Mpv, state: &mut State, delta: f64) {
 
 fn open_dialog(player: &Mpv, pl: &mut Playlist, state: &State, folder: bool) {
     let picked: Vec<PathBuf> = if folder {
-        rfd::FileDialog::new().pick_folder().map(|d| vec![d]).unwrap_or_default()
+        rfd::FileDialog::new()
+            .pick_folder()
+            .map(|d| vec![d])
+            .unwrap_or_default()
     } else {
         rfd::FileDialog::new()
             .add_filter("Video files", playlist::VIDEO_EXTS)
@@ -341,7 +607,6 @@ fn open_index(player: &Mpv, pl: &mut Playlist, _state: &State, index: usize) {
     pl.current = Some(index);
     if let Err(e) = player.loadfile(&path.to_string_lossy()) {
         player.show_text(&format!("Failed to open: {e}"));
-        return;
     }
 }
 
@@ -362,21 +627,66 @@ fn persist(player: &Mpv, pl: &mut Playlist, state: &mut State) {
 }
 
 fn name_of(p: &std::path::Path) -> String {
-    p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
+    p.file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// Extract the platform window id that mpv embeds into.
-fn window_id(window: &winit::window::Window) -> Result<i64, String> {
+fn window_id(window: &Window) -> Result<i64, String> {
     match window.raw_window_handle() {
         #[cfg(windows)]
-        RawWindowHandle::Win32(h) => Ok(h.hwnd as isize as i64),
+        RawWindowHandle::Win32(h) => {
+            // An HWND is a handle, not a number to do arithmetic on: cast
+            // through `isize` and bit 31 being set makes it negative, and mpv
+            // reads `wid <= 0` as "don't embed" — it then opens a window of its
+            // own and ours stays blank forever. Pass it unsigned.
+            let id = h.hwnd as usize as i64;
+            if id <= 0 {
+                return Err(format!("unusable window handle 0x{:X}", h.hwnd as usize));
+            }
+            Ok(id)
+        }
         #[cfg(not(windows))]
         RawWindowHandle::Xlib(h) => Ok(h.window as i64),
         #[cfg(not(windows))]
         RawWindowHandle::Wayland(_) => Err(
-            "Wayland embedding is not supported yet — run with WAYLAND_DISPLAY unset to use X11."
-                .to_string(),
+            "Wayland embedding is not supported yet — run with WAYLAND_DISPLAY unset to use X11.".to_string(),
         ),
         other => Err(format!("Unsupported window system: {other:?}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flags_are_parsed_and_files_kept() {
+        let args = parse_args_from(vec![
+            OsString::from("--verbose"),
+            OsString::from("ep1.mkv"),
+            OsString::from("--safe-mode"),
+        ]);
+        assert!(args.verbose);
+        assert!(args.safe_mode);
+        assert_eq!(args.files, vec![PathBuf::from("ep1.mkv")]);
+    }
+
+    #[test]
+    fn a_file_called_like_a_flag_is_still_a_file() {
+        let args = parse_args_from(vec![OsString::from("movie.mkv")]);
+        assert!(!args.verbose);
+        assert_eq!(args.files, vec![PathBuf::from("movie.mkv")]);
+    }
+
+    #[test]
+    fn fatal_video_output_messages_are_recognised() {
+        assert!(video_output_died(
+            "[vo/gpu-next/win32] unable to create window!\n"
+        ));
+        assert!(video_output_died("Video output failed.\n"));
+        assert!(!video_output_died("[cplayer] Track switched\n"));
+        assert!(!video_output_died("[vo/gpu-next] Using display sync\n"));
     }
 }

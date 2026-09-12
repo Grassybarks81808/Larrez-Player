@@ -1,6 +1,6 @@
 [package]
 name = "larrez-player"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Larrez Player - a lightweight multi-format video player powered by libmpv"
 authors = ["Larrez"]
@@ -19,13 +19,6 @@ rfd = "0.14"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs = "5"
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.52", features = [
-    "Win32_Foundation",
-    "Win32_UI_WindowsAndMessaging",
-    "Win32_System_LibraryLoader",
-] }
 
 [build-dependencies]
 # Embeds the icon + version metadata into the .exe on Windows.

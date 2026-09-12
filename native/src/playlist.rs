@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 /// Containers libmpv/ffmpeg handles. Unlike the web build, this list has no
 /// "codec-dependent" tier — if ffmpeg can demux it, we play it.
 pub const VIDEO_EXTS: &[&str] = &[
-    "mp4", "m4v", "mkv", "webm", "avi", "mov", "wmv", "flv", "ts", "m2ts", "mts", "mpg", "mpeg",
-    "vob", "ogv", "ogm", "rm", "rmvb", "asf", "3gp", "3g2", "divx", "f4v", "mxf", "y4m",
+    "mp4", "m4v", "mkv", "webm", "avi", "mov", "wmv", "flv", "ts", "m2ts", "mts", "mpg", "mpeg", "vob",
+    "ogv", "ogm", "rm", "rmvb", "asf", "3gp", "3g2", "divx", "f4v", "mxf", "y4m",
 ];
 
 pub const SUB_EXTS: &[&str] = &["srt", "ass", "ssa", "sub", "vtt", "idx", "sup"];
@@ -44,8 +44,9 @@ impl Entry {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Repeat {
+    #[default]
     Off,
     All,
     One,
@@ -77,12 +78,6 @@ pub struct Playlist {
     pub repeat: Repeat,
 }
 
-impl Default for Repeat {
-    fn default() -> Self {
-        Repeat::Off
-    }
-}
-
 impl Playlist {
     /// Add paths; directories are walked one level deep for video files.
     pub fn add_paths(&mut self, paths: &[PathBuf]) -> usize {
@@ -90,8 +85,10 @@ impl Playlist {
         for p in paths {
             if p.is_dir() {
                 if let Ok(rd) = std::fs::read_dir(p) {
-                    let mut batch: Vec<PathBuf> =
-                        rd.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| is_video(p)).collect();
+                    let mut batch: Vec<PathBuf> = rd
+                        .filter_map(|e| e.ok().map(|e| e.path()))
+                        .filter(|p| is_video(p))
+                        .collect();
                     batch.sort_by(|a, b| natural_cmp(&a.to_string_lossy(), &b.to_string_lossy()));
                     added.extend(batch);
                 }

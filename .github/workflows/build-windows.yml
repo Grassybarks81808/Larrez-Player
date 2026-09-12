@@ -6,6 +6,11 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      source_ref:
+        description: 'Commit, branch or tag to build (default: the ref this is run from)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -19,7 +24,11 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      # `source_ref` exists so a run can be pointed at any commit - it is how
+      # the smoke test can be compared against a build that predates a change.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -37,15 +46,50 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('native/Cargo.toml') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      # Both of these were allowed to fail from the first commit, which is the
+      # same as never running them. They are enforced now, and a failure is
+      # published as annotations - on a runner there is no console to read.
       - name: Check formatting
         working-directory: native
-        run: cargo fmt --check
-        continue-on-error: true
+        run: |
+          function Publish([string]$level, [string]$title, [string]$text) {
+            $text = ($text -replace '%', '%25') -replace "`r", ''
+            $chunk = ''
+            $parts = [System.Collections.Generic.List[string]]::new()
+            foreach ($line in ($text -split "`n")) {
+              if (($chunk.Length + $line.Length) -gt 3000) { $parts.Add($chunk); $chunk = '' }
+              $chunk += $line + '%0A'
+            }
+            if ($chunk) { $parts.Add($chunk) }
+            for ($i = 0; $i -lt $parts.Count; $i++) {
+              Write-Host "::$level title=$title $($i + 1)/$($parts.Count)::$($parts[$i])"
+            }
+          }
+
+          $out = (cargo fmt --check 2>&1 | Out-String)
+          if ($LASTEXITCODE -eq 0) { Write-Host 'rustfmt is happy' }
+          else { Publish 'notice' 'rustfmt' $out; exit 1 }
 
       - name: Clippy
         working-directory: native
-        run: cargo clippy --release -- -D warnings
-        continue-on-error: true
+        run: |
+          function Publish([string]$level, [string]$title, [string]$text) {
+            $text = ($text -replace '%', '%25') -replace "`r", ''
+            $chunk = ''
+            $parts = [System.Collections.Generic.List[string]]::new()
+            foreach ($line in ($text -split "`n")) {
+              if (($chunk.Length + $line.Length) -gt 3000) { $parts.Add($chunk); $chunk = '' }
+              $chunk += $line + '%0A'
+            }
+            if ($chunk) { $parts.Add($chunk) }
+            for ($i = 0; $i -lt $parts.Count; $i++) {
+              Write-Host "::$level title=$title $($i + 1)/$($parts.Count)::$($parts[$i])"
+            }
+          }
+
+          $out = (cargo clippy --release -- -D warnings 2>&1 | Out-String)
+          if ($LASTEXITCODE -eq 0) { Write-Host 'clippy is happy' }
+          else { Publish 'notice' 'clippy' $out; exit 1 }
 
       - name: Unit tests
         working-directory: native
@@ -125,6 +169,175 @@ jobs:
           $exeSize = (Get-Item $exe).Length
           if ($exeSize -lt 200KB) { throw "larrez-player.exe looks too small ($exeSize bytes)" }
           Write-Host 'Package verified.'
+
+      # The v0.1.0 release shipped a build nobody had ever *run*: PE checks
+      # can't tell you that the player white-screens and dies on launch. This
+      # does. A headless runner gives us no console to read afterwards, so the
+      # player's own log is reported through workflow annotations.
+      - name: Smoke test the app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $logFile = Join-Path $env:APPDATA 'LarrezPlayer\larrez.log'
+          $exe = (Resolve-Path 'dist/larrez-player.exe').Path
+
+          function Announce([string]$level, [string]$text) {
+            if ([string]::IsNullOrWhiteSpace($text)) { return }
+            $escaped = ($text -replace '%', '%25') -replace "`r", '' -replace "`n", '%0A'
+            Write-Host "::$level::$escaped"
+          }
+          function Fail([string]$message) {
+            Announce 'error' $message
+            throw $message
+          }
+          function Tail([string]$path, [int]$count = 150) {
+            if (-not (Test-Path $path)) { return "(no file: $path)" }
+            return ((Get-Content $path -ErrorAction SilentlyContinue |
+                     Select-Object -Last $count) -join "`n")
+          }
+
+          # A crash inside native code (libmpv, a graphics driver, our own FFI)
+          # takes the process down without leaving a log line, so have Windows
+          # write a dump and let the next step read it.
+          $dumpDir = Join-Path $PWD 'crash-dumps'
+          New-Item -ItemType Directory -Force -Path $dumpDir | Out-Null
+          $localDumps = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\larrez-player.exe'
+          New-Item -Path $localDumps -Force | Out-Null
+          Set-ItemProperty -Path $localDumps -Name DumpFolder -Value $dumpDir -Type ExpandString
+          Set-ItemProperty -Path $localDumps -Name DumpType -Value 2 -Type DWord
+          Set-ItemProperty -Path $localDumps -Name DumpCount -Value 10 -Type DWord
+
+          # Give it a real file to play so the decode path is covered too.
+          $clip = Join-Path $PWD 'smoke-clip.mp4'
+          if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
+            & ffmpeg -hide_banner -loglevel error -y `
+                -f lavfi -i "testsrc=size=320x240:rate=15:duration=3" `
+                -c:v libx264 -pix_fmt yuv420p $clip
+          }
+
+          # Launch the player and let it settle. Returns $true if it stayed up.
+          function Run-App([string]$label, [string[]]$extra, [int]$seconds) {
+            $exeArgs = @($extra) + @()
+            if (Test-Path $clip) { $exeArgs += $clip }
+            $stdout = Join-Path $PWD "$label-stdout.txt"
+            $stderr = Join-Path $PWD "$label-stderr.txt"
+            Write-Host "launching ($label): $exe $($exeArgs -join ' ')"
+            $proc = Start-Process -FilePath $exe -ArgumentList $exeArgs -PassThru `
+                -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+            Start-Sleep -Seconds $seconds
+            $alive = -not $proc.HasExited
+            $code = if ($alive) { $null } else { $proc.ExitCode }
+            if (-not $alive) { Announce 'error' "$label`: exited on its own (exit code $code)" }
+            Announce 'notice' "$label` log:`n$(Tail $logFile)"
+            Announce 'notice' "$label` stdout:`n$(Tail $stdout 60)"
+            Announce 'notice' "$label` stderr:`n$(Tail $stderr 60)"
+            return @{ Proc = $proc; Alive = $alive; Code = $code }
+          }
+
+          # 1. It has to survive its own startup. This is the check that would
+          #    have caught a build dying on launch, white window and all.
+          $run = Run-App 'default' @() 15
+          if (-not $run.Alive) {
+            # Which knob moves it? Each variant is reported either way, so a
+            # failed first launch still comes back with an answer.
+            foreach ($variant in @(@('--safe-mode'), @('--verbose'))) {
+              $r = Run-App ($variant -join '') $variant 12
+              if ($r.Alive) { $r.Proc.Kill(); $r.Proc.WaitForExit(10000) }
+            }
+            Fail "larrez-player.exe crashed on startup (exit code $($run.Code))"
+          }
+          $proc = $run.Proc
+          Write-Host "still running after 15s (pid $($proc.Id))"
+
+          # A runner has no GPU, so mpv may have no video output to give us at
+          # all. The player is expected to survive that and say so; if that is
+          # what the log says, there is nothing left for this check to prove and
+          # the picture path simply stays untested here.
+          if ((Test-Path $logFile) -and
+              (Select-String -Path $logFile -Pattern 'no video output' -Quiet)) {
+            Write-Host '::warning::the player reported no video output - no GPU on this runner, so the picture path is untested'
+            $proc.Kill()
+            $proc.WaitForExit(10000)
+            Write-Host 'smoke test complete (startup only)'
+            exit 0
+          }
+
+          # A panic is a bug even when the process survives it: we put a dialog
+          # up for panics, which would otherwise keep this check green.
+          if (Test-Path $logFile) {
+            $fatal = (Select-String -Path $logFile -Pattern '\[fatal\]|panicked at') -join '; '
+            if ($fatal) { Fail "the app logged a fatal error: $fatal" }
+          }
+
+          # 2. Closing the window has to bring the whole thing down cleanly.
+          #    (Soft check: a headless runner may not manage the window itself.)
+          if ($proc.CloseMainWindow()) {
+            if (-not $proc.WaitForExit(20000)) {
+              $proc.Kill()
+              Fail 'larrez-player.exe did not exit after its window was closed'
+            }
+            Announce 'notice' "player log after shutdown:`n$(Tail $logFile)"
+            if ($proc.ExitCode -ne 0) {
+              Fail "unexpected exit code $($proc.ExitCode) after closing the window"
+            }
+            Write-Host 'closed cleanly'
+          } else {
+            Write-Host '::warning::no main window to close - killing the process instead'
+            $proc.Kill()
+            $proc.WaitForExit(10000)
+          }
+          Write-Host 'smoke test complete'
+
+      - name: Report the crash
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          function Announce([string]$level, [string]$text) {
+            if ([string]::IsNullOrWhiteSpace($text)) { return }
+            $escaped = ($text -replace '%', '%25') -replace "`r", '' -replace "`n", '%0A'
+            Write-Host "::$level::$escaped"
+          }
+
+          # Windows records the faulting module of every crash in the
+          # Application log. That is the one piece of evidence the player
+          # cannot write itself.
+          try {
+            $events = Get-WinEvent -FilterHashtable @{
+                LogName = 'Application'
+                ProviderName = @('Application Error', 'Windows Error Reporting')
+              } -MaxEvents 8 -ErrorAction Stop
+            foreach ($e in $events) {
+              Announce 'notice' "event $($e.Id) at $($e.TimeCreated):`n$($e.Message)"
+            }
+          } catch {
+            Write-Host "::warning::no crash was recorded in the Application log ($_)"
+          }
+
+          # And if a dump landed, let the debugger name the module and the
+          # call stack it was executing.
+          $dumps = @(Get-ChildItem (Join-Path $PWD 'crash-dumps') -Filter '*.dmp' -ErrorAction SilentlyContinue)
+          if ($dumps.Count -eq 0) {
+            Write-Host 'no dump was written'
+            exit 0
+          }
+          $cdb = 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe'
+          if (-not (Test-Path $cdb)) {
+            $found = Get-ChildItem 'C:\Program Files*\Windows Kits' -Recurse -Filter 'cdb.exe' `
+                     -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $cdb = $found.FullName }
+          }
+          if (-not (Test-Path $cdb)) {
+            Write-Host "::warning::no debugger on this runner; dumps: $($dumps.Name -join ', ')"
+            exit 0
+          }
+          $symbols = 'srv*C:\symbols*https://msdl.microsoft.com/download/symbols'
+          foreach ($dump in $dumps) {
+            $out = Join-Path $PWD "$($dump.BaseName)-analysis.txt"
+            & $cdb -z $dump.FullName -y $symbols -c '.ecxr; !analyze -v; kb; q' *> $out
+            Announce 'notice' "dump $( $dump.Name ) analysis:`n$((Get-Content $out |
+                     Select-Object -First 120) -join "`n")"
+          }
 
       - name: Package zip
         shell: pwsh

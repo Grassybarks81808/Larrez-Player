@@ -6,7 +6,10 @@ fn main() {
             res.set_icon("assets/larrez.ico");
         }
         res.set("ProductName", "Larrez Player");
-        res.set("FileDescription", "Larrez Player - lightweight multi-format video player");
+        res.set(
+            "FileDescription",
+            "Larrez Player - lightweight multi-format video player",
+        );
         res.set("LegalCopyright", "MIT Licensed");
         let _ = res.compile();
     }
