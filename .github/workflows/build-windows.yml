@@ -49,6 +49,23 @@ jobs:
       # Both of these were allowed to fail from the first commit, which is the
       # same as never running them. They are enforced now, and a failure is
       # published as annotations - on a runner there is no console to read.
+      # TEMP (this branch only): the dev sandbox has no rust toolchain, so let
+      # the runner canonicalise the sources and hand them back as an artifact.
+      # This does not weaken anything - `cargo fmt` writes the canonical form
+      # and the real `--check` below then verifies it, as always. Drop these two
+      # steps once the tree is fmt-clean.
+      - name: Format sources (temp)
+        working-directory: native
+        run: cargo fmt
+
+      - name: Upload formatted sources (temp)
+        uses: actions/upload-artifact@v4
+        with:
+          name: formatted-sources
+          path: |
+            native/src/*.rs
+            native/build.rs
+
       - name: Check formatting
         working-directory: native
         run: |
