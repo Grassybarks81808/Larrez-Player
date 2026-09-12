@@ -119,12 +119,18 @@ fn error_dialog(title: &str, text: &str) {
 fn run(args: &Args) -> Result<(), String> {
     let mut state = State::load();
 
+    // Breadcrumbs. An access violation takes the process down without a
+    // whisper otherwise, and the last line in the log is what names the step
+    // that did it.
+    logging::log("info", "startup: creating the event loop");
     let event_loop = EventLoop::new().map_err(|e| e.to_string())?;
+    logging::log("info", "startup: event loop ready");
 
     // Built hidden on purpose: winit registers its window class without a
     // background brush, so a window that is shown before anything paints it is
     // a white rectangle. We make it black and hand it to mpv first, and only
     // then put it on screen.
+    logging::log("info", "startup: creating the window");
     let window = WindowBuilder::new()
         .with_title("Larrez Player")
         .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 720.0))
@@ -133,18 +139,21 @@ fn run(args: &Args) -> Result<(), String> {
         .build(&event_loop)
         .map_err(|e| e.to_string())?;
 
+    logging::log("info", "startup: window created");
     #[cfg(windows)]
     {
         let hwnd = win::hwnd_of(&window)?;
         win::prepare_video_window(hwnd)?;
+        logging::log("info", "startup: window prepared for video");
     }
 
     let wid = window_id(&window)?;
+    logging::log("info", &format!("startup: window id 0x{wid:X}, loading libmpv"));
     let mut player = Mpv::new(
         wid,
         mpv::Config { verbose: args.verbose, safe_mode: args.safe_mode },
     )?;
-    logging::log("info", &format!("embedding the video output in window 0x{wid:X}"));
+    logging::log("info", &format!("startup: mpv ready, embedding in window 0x{wid:X}"));
     if args.safe_mode {
         logging::log("info", "safe mode: hardware decoding off, plain GPU path");
     }
