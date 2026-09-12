@@ -121,6 +121,13 @@ edit the defaults in `native/src/mpv.rs` and rebuild.
 **"Could not load libmpv"** — `mpv-2.dll` isn't beside the `.exe`. Re-extract the
 zip, keeping the files together.
 
+**The window flashes and the player is gone** — that is a crash, not a blank
+picture. Version 0.1.1 fixed the one that killed every 0.1.0 launch (an access
+violation inside libmpv, exit code `0xC0000005`); if you still see it, the last
+line of `%APPDATA%\LarrezPlayer\larrez.log` says how far the player got, and
+that log is what a [bug report](https://github.com/Grassybarks81808/Larrez-Player/issues)
+needs.
+
 **The window is blank (white or black) and the video never appears** — the
 player starts its window before the video output has painted anything, so what
 you are seeing is the absence of a picture rather than a crash. In practice it
