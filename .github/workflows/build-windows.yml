@@ -127,21 +127,31 @@ jobs:
           Write-Host 'Package verified.'
 
       # The v0.1.0 release shipped a build nobody had ever *run*: PE checks
-      # can't tell you that the player exits the moment it starts. This does.
+      # can't tell you that the player white-screens and dies on launch. This
+      # does. A headless runner gives us no console to read afterwards, so the
+      # player's own log is reported through workflow annotations.
       - name: Smoke test the app
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
           $logFile = Join-Path $env:APPDATA 'LarrezPlayer\larrez.log'
           $exe = (Resolve-Path 'dist/larrez-player.exe').Path
+          $stdoutFile = Join-Path $PWD 'app-stdout.txt'
+          $stderrFile = Join-Path $PWD 'app-stderr.txt'
 
-          function Show-Log([string]$title) {
-            Write-Host "===== $title ====="
-            if (Test-Path $logFile) {
-              Get-Content $logFile | Select-Object -Last 250 | ForEach-Object { Write-Host $_ }
-            } else {
-              Write-Host "(no log file at $logFile)"
-            }
+          function Announce([string]$level, [string]$text) {
+            if ([string]::IsNullOrWhiteSpace($text)) { return }
+            $escaped = ($text -replace '%', '%25') -replace "`r", '' -replace "`n", '%0A'
+            Write-Host "::$level::$escaped"
+          }
+          function Fail([string]$message) {
+            Announce 'error' $message
+            throw $message
+          }
+          function Tail([string]$path, [int]$count = 150) {
+            if (-not (Test-Path $path)) { return "(no file: $path)" }
+            return ((Get-Content $path -ErrorAction SilentlyContinue |
+                     Select-Object -Last $count) -join "`n")
           }
 
           # Give it a real file to play so the decode path is covered too.
@@ -161,22 +171,24 @@ jobs:
           # 1. It has to survive its own startup. This is the check that would
           #    have caught a build dying on launch, white window and all.
           Write-Host "launching: $exe $($exeArgs -join ' ')"
-          $proc = Start-Process -FilePath $exe -ArgumentList $exeArgs -PassThru
+          $proc = Start-Process -FilePath $exe -ArgumentList $exeArgs -PassThru `
+              -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
           Start-Sleep -Seconds 15
+
+          Announce 'notice' "player log:`n$(Tail $logFile)"
+          Announce 'notice' "player stdout:`n$(Tail $stdoutFile 60)"
+          Announce 'notice' "player stderr:`n$(Tail $stderrFile 60)"
+
           if ($proc.HasExited) {
-            Show-Log 'log after early exit'
-            throw "larrez-player.exe exited on its own after 15s (exit code $($proc.ExitCode))"
+            Fail "larrez-player.exe exited on its own after 15s (exit code $($proc.ExitCode))"
           }
           Write-Host "still running after 15s (pid $($proc.Id))"
-          Show-Log 'log while running'
 
-          # A panic inside the player is a bug even if the process survives it
-          # (we show a dialog, which would otherwise keep this test green).
+          # A panic is a bug even when the process survives it: we put a dialog
+          # up for panics, which would otherwise keep this check green.
           if (Test-Path $logFile) {
-            $fatal = Select-String -Path $logFile -Pattern '\[fatal\]|panicked at'
-            if ($fatal) {
-              throw "the app logged a fatal error: $fatal"
-            }
+            $fatal = (Select-String -Path $logFile -Pattern '\[fatal\]|panicked at') -join '; '
+            if ($fatal) { Fail "the app logged a fatal error: $fatal" }
           }
 
           # 2. Closing the window has to bring the whole thing down cleanly.
@@ -184,17 +196,17 @@ jobs:
           if ($proc.CloseMainWindow()) {
             if (-not $proc.WaitForExit(20000)) {
               $proc.Kill()
-              Show-Log 'log after kill'
-              throw 'larrez-player.exe did not exit after its window was closed'
+              Fail 'larrez-player.exe did not exit after its window was closed'
             }
-            Show-Log 'log after shutdown'
-            Write-Host "exit code after closing the window: $($proc.ExitCode)"
-            if ($proc.ExitCode -ne 0) { throw "unexpected exit code $($proc.ExitCode)" }
+            Announce 'notice' "player log after shutdown:`n$(Tail $logFile)"
+            if ($proc.ExitCode -ne 0) {
+              Fail "unexpected exit code $($proc.ExitCode) after closing the window"
+            }
+            Write-Host 'closed cleanly'
           } else {
             Write-Host '::warning::no main window to close - killing the process instead'
             $proc.Kill()
             $proc.WaitForExit(10000)
-            Show-Log 'log after kill'
           }
           Write-Host 'smoke test complete'
 
