@@ -90,6 +90,17 @@ pub fn prepare_video_window(hwnd: Hwnd) -> Result<(), String> {
     Ok(())
 }
 
+/// Mark a whole window dirty without erasing its background.
+///
+/// Both the host window and the overlay chrome need exactly this: the video
+/// child paints itself, and an erase would flash a black rectangle over it. The
+/// declaration of `InvalidateRect` lives here and only here - a second one in
+/// another module with a different second parameter is a
+/// `clashing_extern_declarations` error, and the types are what make it wrong.
+pub unsafe fn invalidate(hwnd: Hwnd) {
+    InvalidateRect(hwnd, ptr::null(), 0);
+}
+
 /// A dialog box. Used from the panic hook, so it must not depend on anything
 /// that can itself fail (no COM, no dialogs from a half-initialised state).
 pub fn message_box(title: &str, text: &str) {

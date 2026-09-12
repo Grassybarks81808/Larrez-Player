@@ -36,6 +36,10 @@ WebM · OGV · RM/RMVB · 3GP · DivX · MXF
 
 ## Features
 
+- On-screen controls: a floating transport bar over the video, with a scrub
+  track you can drag, and a playlist panel — both fade out while you watch and
+  come back with the mouse
+- `Tab` toggles the playlist; clicking a row plays it
 - Drag & drop files or folders; playlist with shuffle and repeat off/all/one
 - Resume where you left off, per file
 - Audio-track and subtitle-track cycling, external subtitle loading
@@ -55,6 +59,7 @@ WebM · OGV · RM/RMVB · 3GP · DivX · MXF
 | `↑` / `↓` | Volume | `V` | Cycle subtitles |
 | `N` / `P` | Next / previous | `B` | Load subtitle file |
 | `S` / `R` | Shuffle / repeat | `C` | Screenshot |
+| `Tab` | Playlist panel | `I` | Position info |
 | `[` / `]` / `\` | Speed down / up / reset | `O` / `D` | Open file / folder |
 | `I` | Position info | `H` / `Q` | Help / quit |
 
@@ -62,7 +67,8 @@ WebM · OGV · RM/RMVB · 3GP · DivX · MXF
 
 ## Why it's light
 
-The player process does **no per-frame work whatsoever**.
+The player process does **no per-frame work whatsoever** — including the
+interface.
 
 libmpv is handed the window's raw `HWND` and renders into it directly, driving
 its own presentation on the GPU. We never create a GPU context, never run a
@@ -73,6 +79,11 @@ playback position.
 Hardware decoding is on by default — **D3D11VA** on Windows via `hwdec=auto-safe`,
 with mpv's `gpu-next` renderer where available. The GPU decodes; the CPU mostly
 idles. Expect tens of MB of RAM at rest and single-digit CPU on 4K HEVC.
+
+The interface is two layered child windows painted with GDI above mpv's output
+window, and it repaints on pointer input and on the tick — never per frame. It
+fades itself out on its own timers, so a hidden bar costs the main loop nothing
+and a visible one costs four small paints a second.
 
 The binary itself is built with fat LTO, one codegen unit, `panic=abort`, and
 stripped symbols.
@@ -122,6 +133,7 @@ native/src/mpv.rs        hand-rolled libmpv FFI (runtime-loaded, zero crates)
 native/src/win.rs        Win32 window setup: black background, WS_CLIPCHILDREN
 native/src/logging.rs    log file + panic hook, so failures leave evidence
 native/src/playlist.rs   playlist model, natural sort, resume persistence
+native/src/ui.rs         the interface: layered overlay windows, GDI painting
 src/main.ts              web prototype player logic
 src/formats.ts           codec probing, SRT to VTT
 docs/USAGE.md            Windows install, shortcuts, troubleshooting

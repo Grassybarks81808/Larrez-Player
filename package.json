@@ -1,7 +1,7 @@
 {
   "name": "larrez-player",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.2.0",
   "type": "module",
   "description": "Larrez Player - a lightweight multi-format video player",
   "scripts": {

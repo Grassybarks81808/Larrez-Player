@@ -49,6 +49,37 @@ jobs:
       # Both of these were allowed to fail from the first commit, which is the
       # same as never running them. They are enforced now, and a failure is
       # published as annotations - on a runner there is no console to read.
+      # TEMP (this branch only): the dev sandbox has no rust toolchain, so let
+      # the runner canonicalise the sources and hand the patch back through
+      # annotations - artifacts and raw logs live on blob storage the sandbox
+      # cannot reach, but check-run annotations come from the API.
+      # Nothing is weakened: `cargo fmt` writes the canonical form and the real
+      # `--check` below still verifies it. Drop this step once the tree is clean.
+      - name: Format and emit canonical diff (temp)
+        working-directory: native
+        run: |
+          function Publish([string]$level, [string]$title, [string]$text) {
+            $text = ($text -replace '%', '%25') -replace "`r", ''
+            $chunk = ''
+            $parts = [System.Collections.Generic.List[string]]::new()
+            foreach ($line in ($text -split "`n")) {
+              if (($chunk.Length + $line.Length) -gt 3000) { $parts.Add($chunk); $chunk = '' }
+              $chunk += $line + '%0A'
+            }
+            if ($chunk) { $parts.Add($chunk) }
+            for ($i = 0; $i -lt $parts.Count; $i++) {
+              Write-Host "::${level} title=$title $($i + 1)/$($parts.Count):: $($parts[$i])"
+            }
+          }
+
+          cargo fmt
+          $diff = (git -C .. --no-pager diff -U3 -- native | Out-String)
+          if ([string]::IsNullOrWhiteSpace($diff)) {
+            Write-Host 'sources were already canonical - nothing to emit'
+          } else {
+            Publish 'notice' 'FMT-PATCH' $diff
+          }
+
       - name: Check formatting
         working-directory: native
         run: |

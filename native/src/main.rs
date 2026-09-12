@@ -6,6 +6,11 @@
 //! render loop, no polling. The event loop sleeps via `ControlFlow::WaitUntil`
 //! and wakes ~4×/sec only to service mpv's event queue and persist position.
 //!
+//! The interface (transport bar, playlist panel) is two layered child windows
+//! of ours, painted with GDI and kept above mpv's child - see `ui`. It repaints
+//! on pointer input and on the tick below, and only while it is on screen, so
+//! this stays true: nothing here runs per frame.
+//!
 //! That is the whole "doesn't use much system resources" story: the codec is
 //! the only meaningful consumer, and it runs on the GPU.
 //!
@@ -25,6 +30,7 @@
 mod logging;
 mod mpv;
 mod playlist;
+mod ui;
 #[cfg(windows)]
 mod win;
 
@@ -145,6 +151,11 @@ fn run(args: &Args) -> Result<(), String> {
         let hwnd = win::hwnd_of(&window)?;
         win::prepare_video_window(hwnd)?;
         logging::log("info", "startup: window prepared for video");
+        // The interface is worth having and not worth dying for: if the overlay
+        // windows cannot be made, the player still plays, and the log says why.
+        if let Err(e) = ui::attach(hwnd) {
+            logging::log("warn", &format!("interface unavailable: {e}"));
+        }
     }
 
     let wid = window_id(&window)?;
@@ -207,6 +218,12 @@ fn run(args: &Args) -> Result<(), String> {
     let mut loaded_at: Option<Instant> = None;
     let verbose = args.verbose;
 
+    // Hand the interface what it needs before the window appears, so the first
+    // frame the user sees already has its controls in it.
+    publish_playlist(&pl);
+    ui::sync(snapshot(&player, false));
+    ui::note_motion();
+
     event_loop
         .run(move |event, elwt| {
             elwt.set_control_flow(ControlFlow::WaitUntil(Instant::now() + TICK));
@@ -234,6 +251,7 @@ fn run(args: &Args) -> Result<(), String> {
                             let n = pl.add_paths(&[path]);
                             if n > 0 {
                                 player.show_text(&format!("Added {n} file(s)"));
+                                publish_playlist(&pl);
                                 if was_empty {
                                     open_index(&player, &mut pl, &state, 0);
                                 }
@@ -245,8 +263,17 @@ fn run(args: &Args) -> Result<(), String> {
                         state: st, button, ..
                     } => {
                         if st == ElementState::Pressed && button == MouseButton::Left {
+                            ui::note_video_click();
                             player.toggle_pause();
                         }
+                    }
+
+                    WindowEvent::CursorMoved { .. } => ui::note_motion(),
+
+                    // The chrome derives its geometry from the parent, but it has
+                    // to be told to look again.
+                    WindowEvent::Resized(_) => {
+                        ui::relayout();
                     }
 
                     WindowEvent::KeyboardInput {
@@ -362,6 +389,7 @@ fn run(args: &Args) -> Result<(), String> {
                             MpvEvent::Shutdown => {
                                 logging::log("info", "mpv asked us to quit");
                                 persist(&player, &mut pl, &mut state);
+                                ui::dispose();
                                 player.shutdown();
                                 alive = false;
                                 elwt.exit();
@@ -399,9 +427,26 @@ fn run(args: &Args) -> Result<(), String> {
                         last_save = Instant::now();
                         persist(&player, &mut pl, &mut state);
                     }
+
+                    // The interface is a client of this tick, not a second loop:
+                    // it is told what changed, and hands back what the user asked
+                    // for. Nothing it does reaches mpv from a window procedure.
+                    ui::sync(snapshot(&player, fullscreen));
+                    let actions = ui::take_actions();
+                    if actions.any() {
+                        apply_actions(
+                            actions,
+                            &player,
+                            &mut pl,
+                            &mut state,
+                            &window,
+                            &mut fullscreen,
+                        );
+                    }
                 }
 
                 WinitEvent::LoopExiting => {
+                    ui::dispose();
                     // mpv's video output is a child window of ours and its Win32
                     // hooks sit on this thread, so tear it down while the window
                     // is still alive and before the process starts unwinding.
@@ -415,6 +460,106 @@ fn run(args: &Args) -> Result<(), String> {
             }
         })
         .map_err(|e| e.to_string())
+}
+
+/// What the bar draws. Read from mpv on the tick rather than pushed from a
+/// render loop: a handful of in-process property reads, four times a second,
+/// and only while the window is alive.
+fn snapshot(player: &Mpv, fullscreen: bool) -> ui::Snapshot {
+    let dur = player.duration();
+    let pos = player.time_pos();
+    let paused = player.get_flag("pause").unwrap_or(true);
+    let cached = player.get_double("demuxer-cache-duration").unwrap_or(0.0);
+    ui::Snapshot {
+        pos,
+        dur,
+        buffered: if dur > 0.0 {
+            ((pos + cached) / dur).clamp(0.0, 1.0)
+        } else {
+            0.0
+        },
+        volume: player.get_double("volume").unwrap_or(100.0),
+        speed: player.get_double("speed").unwrap_or(1.0),
+        playing: !paused && dur > 0.0,
+        muted: player.get_flag("mute").unwrap_or(false),
+        fullscreen,
+    }
+}
+
+/// The panel lists what the playlist holds, in the order the user sees it.
+fn publish_playlist(pl: &Playlist) {
+    let names: Vec<String> = pl.items.iter().map(|e| e.name.clone()).collect();
+    ui::set_playlist(&names, pl.current);
+}
+
+/// Applies everything the chrome reported since the last tick.
+#[allow(clippy::too_many_arguments)]
+fn apply_actions(
+    actions: ui::Actions,
+    player: &Mpv,
+    pl: &mut Playlist,
+    state: &mut State,
+    window: &Window,
+    fullscreen: &mut bool,
+) {
+    if actions.toggle_pause {
+        player.toggle_pause();
+    }
+    if let Some(secs) = actions.seek {
+        player.seek_absolute(secs);
+    }
+    if let Some(volume) = actions.volume {
+        state.volume = volume;
+        let _ = player.set_double("volume", volume);
+    }
+    if actions.toggle_mute {
+        player.toggle_mute();
+        state.muted = player.get_flag("mute").unwrap_or(state.muted);
+    }
+    if actions.cycle_speed {
+        state.speed = next_speed(state.speed);
+        player.set_speed(state.speed);
+        player.show_text(&format!("Speed {:.2}x", state.speed));
+    }
+    if actions.toggle_fullscreen {
+        *fullscreen = !*fullscreen;
+        window.set_fullscreen(fullscreen.then(|| Fullscreen::Borderless(None)));
+    }
+    if actions.screenshot {
+        player.screenshot();
+        player.show_text("Screenshot saved");
+    }
+    if actions.prev {
+        if let Some(n) = pl.prev_index() {
+            open_index(player, pl, state, n);
+        }
+    }
+    if actions.next {
+        if let Some(n) = pl.next_index(false) {
+            open_index(player, pl, state, n);
+        }
+    }
+    if let Some(index) = actions.play_row {
+        open_index(player, pl, state, index);
+    }
+    if actions.open_files {
+        open_dialog(player, pl, state, false);
+    }
+    if actions.toggle_playlist {
+        // The panel keeps its own open state; this only leaves a trace for when
+        // a report asks what the interface was doing at the time.
+        logging::log("debug", "playlist panel toggled");
+    }
+}
+
+/// The speed ladder, wrapping to the start so one control cycles forever.
+const SPEEDS: [f64; 8] = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0];
+
+fn next_speed(cur: f64) -> f64 {
+    SPEEDS
+        .into_iter()
+        .find(|s| *s > cur + 0.001)
+        .unwrap_or(SPEEDS[0])
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -433,6 +578,8 @@ fn handle_key(
         Key::Named(NamedKey::ArrowRight) => player.seek_relative(5.0),
         Key::Named(NamedKey::ArrowUp) => player.add_volume(5.0),
         Key::Named(NamedKey::ArrowDown) => player.add_volume(-5.0),
+
+        Key::Named(NamedKey::Tab) => ui::toggle_playlist(),
 
         Key::Named(NamedKey::Escape) => {
             if *fullscreen {
@@ -596,6 +743,7 @@ fn open_dialog(player: &Mpv, pl: &mut Playlist, state: &State, folder: bool) {
         return;
     }
     player.show_text(&format!("Added {n} file(s)"));
+    publish_playlist(pl);
     if was_empty {
         open_index(player, pl, state, 0);
     }
@@ -603,6 +751,7 @@ fn open_dialog(player: &Mpv, pl: &mut Playlist, state: &State, folder: bool) {
 
 fn open_index(player: &Mpv, pl: &mut Playlist, _state: &State, index: usize) {
     let Some(entry) = pl.items.get(index) else { return };
+    publish_playlist(pl);
     let path = entry.path.clone();
     pl.current = Some(index);
     if let Err(e) = player.loadfile(&path.to_string_lossy()) {
@@ -678,6 +827,20 @@ mod tests {
         let args = parse_args_from(vec![OsString::from("movie.mkv")]);
         assert!(!args.verbose);
         assert_eq!(args.files, vec![PathBuf::from("movie.mkv")]);
+    }
+
+    #[test]
+    fn the_speed_ladder_steps_up_and_wraps() {
+        assert_eq!(next_speed(1.0), 1.5);
+        assert_eq!(next_speed(0.9), 1.0);
+        assert_eq!(next_speed(4.0), 0.25);
+        // Repeated clicks must land on rungs, so what the bar prints is always
+        // a speed mpv was actually given.
+        let mut s = 1.0;
+        for _ in 0..SPEEDS.len() {
+            s = next_speed(s);
+            assert!(SPEEDS.contains(&s), "{s} left the ladder");
+        }
     }
 
     #[test]
