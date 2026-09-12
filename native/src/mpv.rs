@@ -74,7 +74,14 @@ type FnCreate = unsafe extern "C" fn() -> *mut MpvHandle;
 type FnInitialize = unsafe extern "C" fn(*mut MpvHandle) -> c_int;
 type FnTerminate = unsafe extern "C" fn(*mut MpvHandle);
 type FnCommand = unsafe extern "C" fn(*mut MpvHandle, *mut *const c_char) -> c_int;
-type FnSetOption = unsafe extern "C" fn(*mut MpvHandle, *const c_char, c_int, *mut c_void) -> c_int;
+/// `int mpv_set_option_string(mpv_handle *ctx, const char *name, const char *data)`
+/// — three arguments, no format. This binding used to describe it as the
+/// four-argument `mpv_set_option`, so every option change passed a small
+/// integer (`MPV_FORMAT_STRING`, i.e. 1) in the register mpv reads as the value
+/// pointer. mpv dereferenced `(char *)1` and the player died with an access
+/// violation before it finished starting: the white window that flashed and
+/// then vanished. Keep this type and `set_option` in step with the prototype.
+type FnSetOptionString = unsafe extern "C" fn(*mut MpvHandle, *const c_char, *const c_char) -> c_int;
 type FnSetProperty = unsafe extern "C" fn(*mut MpvHandle, *const c_char, c_int, *mut c_void) -> c_int;
 type FnGetProperty = unsafe extern "C" fn(*mut MpvHandle, *const c_char, c_int, *mut c_void) -> c_int;
 type FnObserveProperty = unsafe extern "C" fn(*mut MpvHandle, u64, *const c_char, c_int) -> c_int;
@@ -89,7 +96,7 @@ struct Api {
     initialize: FnInitialize,
     terminate: FnTerminate,
     command: FnCommand,
-    set_option: FnSetOption,
+    set_option_string: FnSetOptionString,
     set_property: FnSetProperty,
     get_property: FnGetProperty,
     observe_property: FnObserveProperty,
@@ -233,7 +240,7 @@ fn load_api() -> Result<Api, String> {
         initialize: sym!("mpv_initialize"),
         terminate: sym!("mpv_terminate_destroy"),
         command: sym!("mpv_command"),
-        set_option: sym!("mpv_set_option_string"),
+        set_option_string: sym!("mpv_set_option_string"),
         set_property: sym!("mpv_set_property"),
         get_property: sym!("mpv_get_property"),
         observe_property: sym!("mpv_observe_property"),
@@ -290,7 +297,8 @@ impl Mpv {
         // mpv takes the id as an int64 (its docs say to cast an HWND through
         // intptr_t) and treats anything <= 0 as "do not embed", so callers must
         // hand us a positive id — see `window_id()` in main.rs.
-        mpv.set_option_int64("wid", wid)
+        let wid_text = wid.to_string();
+        mpv.set_option("wid", &wid_text)
             .map_err(|e| format!("could not embed the video output into our window: {e}"))?;
 
         // --- Performance-critical defaults ---
@@ -361,22 +369,12 @@ impl Mpv {
         Err(format!("{what}: {msg}"))
     }
 
+    /// Set an option. mpv parses the value itself, exactly as it would a
+    /// command line flag, so numbers go in as numbers written out in text.
     pub fn set_option(&mut self, key: &str, val: &str) -> Result<(), String> {
         let k = CString::new(key).map_err(|e| e.to_string())?;
         let v = CString::new(val).map_err(|e| e.to_string())?;
-        let rc = unsafe {
-            (self.api.set_option)(self.ctx, k.as_ptr(), MPV_FORMAT_STRING, v.as_ptr() as *mut c_void)
-        };
-        self.check(rc, &format!("set_option({key})"))
-    }
-
-    /// Set an integer option. mpv's own embedding examples pass `wid` this way.
-    pub fn set_option_int64(&mut self, key: &str, val: i64) -> Result<(), String> {
-        let k = CString::new(key).map_err(|e| e.to_string())?;
-        let mut v = val;
-        let rc = unsafe {
-            (self.api.set_option)(self.ctx, k.as_ptr(), MPV_FORMAT_INT64, &mut v as *mut _ as *mut c_void)
-        };
+        let rc = unsafe { (self.api.set_option_string)(self.ctx, k.as_ptr(), v.as_ptr()) };
         self.check(rc, &format!("set_option({key})"))
     }
 
