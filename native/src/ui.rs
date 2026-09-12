@@ -1115,7 +1115,7 @@ mod platform {
                             InvalidateRect(hwnd, std::ptr::null(), 0);
                         }
                         if c.dragging {
-                            if let Some((what, _)) = over {
+                            if let Some(what) = over {
                                 drag_update(c, hwnd, what, p);
                             }
                         }

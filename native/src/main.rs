@@ -293,6 +293,7 @@ fn run(args: &Args) -> Result<(), String> {
                             &mut state,
                             &window,
                             &mut fullscreen,
+                            elwt,
                         );
                     }
 
