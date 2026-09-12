@@ -73,7 +73,7 @@ jobs:
           }
 
           cargo fmt
-          $diff = (git --no-pager diff -U3 -- native | Out-String)
+          $diff = (git -C .. --no-pager diff -U3 -- native | Out-String)
           if ([string]::IsNullOrWhiteSpace($diff)) {
             Write-Host 'sources were already canonical - nothing to emit'
           } else {

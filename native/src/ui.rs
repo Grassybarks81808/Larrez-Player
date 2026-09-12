@@ -106,6 +106,8 @@ impl Actions {
 mod platform {
     use super::{Actions, Hwnd, Snapshot};
     use crate::playlist::fmt_time;
+    // The single InvalidateRect declaration lives with the window setup it belongs to.
+    use crate::win;
     use std::ffi::{c_int, c_void, OsStr};
     use std::os::windows::ffi::OsStrExt;
     use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
@@ -148,7 +150,6 @@ mod platform {
             flags: u32,
         ) -> c_int;
         fn GetClientRect(hwnd: Hwnd, rect: *mut Rect) -> c_int;
-        fn InvalidateRect(hwnd: Hwnd, rect: *const Rect, erase: c_int) -> c_int;
         fn BeginPaint(hwnd: Hwnd, ps: *mut PaintStruct) -> Hwnd;
         fn EndPaint(hwnd: Hwnd, ps: *const PaintStruct) -> c_int;
         fn SetTimer(hwnd: Hwnd, id: usize, elapsed: u32, func: *const c_void) -> usize;
@@ -586,10 +587,10 @@ mod platform {
                 // raise is a control bar under the video.
                 raise(&c);
                 if moved {
-                    InvalidateRect(c.bar.get(), std::ptr::null(), 0);
+                    win::invalidate(c.bar.get());
                 }
                 if c.list_open {
-                    InvalidateRect(c.panel.get(), std::ptr::null(), 0);
+                    win::invalidate(c.panel.get());
                 }
                 if !snap.playing {
                     // Paused or finished: the chrome stays put, it does not walk
@@ -613,7 +614,7 @@ mod platform {
                     c.scroll = max;
                 }
                 if c.visible && c.list_open {
-                    InvalidateRect(c.panel.get(), std::ptr::null(), 0);
+                    win::invalidate(c.panel.get());
                 }
             }
         }
@@ -675,7 +676,7 @@ mod platform {
             if c.list_open && !c.visible {
                 show(&mut c);
             }
-            InvalidateRect(c.panel.get(), std::ptr::null(), 0);
+            win::invalidate(c.panel.get());
         }
     }
 
@@ -1105,14 +1106,14 @@ mod platform {
                         if over != c.hot || row != c.hot_row {
                             c.hot = over;
                             c.hot_row = row;
-                            InvalidateRect(hwnd, std::ptr::null(), 0);
+                            win::invalidate(hwnd);
                         }
                     } else {
                         let l = bar_layout(hwnd);
                         let over = l.at(p).map(|(h, _)| h);
                         if over != c.hot {
                             c.hot = over;
-                            InvalidateRect(hwnd, std::ptr::null(), 0);
+                            win::invalidate(hwnd);
                         }
                         if c.dragging {
                             if let Some(what) = over {
@@ -1144,7 +1145,7 @@ mod platform {
                             }
                         }
                     }
-                    InvalidateRect(hwnd, std::ptr::null(), 0);
+                    win::invalidate(hwnd);
                     true
                 }
                 WM_LBUTTONUP => {
@@ -1183,7 +1184,7 @@ mod platform {
                                 c.actions.toggle_playlist = true;
                                 if c.list_open {
                                     ShowWindow(c.panel.get(), SW_SHOWNA);
-                                    InvalidateRect(c.panel.get(), std::ptr::null(), 0);
+                                    win::invalidate(c.panel.get());
                                 } else {
                                     ShowWindow(c.panel.get(), SW_HIDE);
                                 }
@@ -1195,7 +1196,7 @@ mod platform {
                     }
                     c.pressed = None;
                     c.dragging = false;
-                    InvalidateRect(hwnd, std::ptr::null(), 0);
+                    win::invalidate(hwnd);
                     true
                 }
                 WM_MOUSEWHEEL => {
@@ -1205,13 +1206,13 @@ mod platform {
                         let max = max_scroll(c);
                         c.scroll = (c.scroll - step * ROW_H * scale_of(hwnd)).clamp(0, max);
                         if before != c.scroll {
-                            InvalidateRect(hwnd, std::ptr::null(), 0);
+                            win::invalidate(hwnd);
                         }
                     } else {
                         let vol = (c.snap.volume + step as f64 * 2.0).clamp(0.0, 100.0);
                         c.actions.volume = Some(vol);
                         c.snap.volume = vol;
-                        InvalidateRect(hwnd, std::ptr::null(), 0);
+                        win::invalidate(hwnd);
                     }
                     true
                 }
@@ -1219,7 +1220,7 @@ mod platform {
                     c.hover_armed = false;
                     c.hot = None;
                     c.hot_row = None;
-                    InvalidateRect(hwnd, std::ptr::null(), 0);
+                    win::invalidate(hwnd);
                     if c.snap.playing {
                         restart_idle(c);
                     }
@@ -1251,13 +1252,13 @@ mod platform {
                 let t = l.scrub.frac_x(p.x) * c.snap.dur;
                 c.snap.pos = t;
                 c.actions.seek = Some(t);
-                InvalidateRect(hwnd, std::ptr::null(), 0);
+                win::invalidate(hwnd);
             }
             Hit::Volume => {
                 let v = l.volume.frac_x(p.x) * 100.0;
                 c.snap.volume = v;
                 c.actions.volume = Some(v);
-                InvalidateRect(hwnd, std::ptr::null(), 0);
+                win::invalidate(hwnd);
             }
             _ => {}
         }
@@ -1565,8 +1566,8 @@ mod platform {
         match what {
             Hit::Play => {
                 if alt {
-                    RoundRect(dc, cx - 6 * u, cy - 7 * u, cx - 1 * u, cy + 7 * u, 2 * u, 2 * u);
-                    RoundRect(dc, cx + 1 * u, cy - 7 * u, cx + 6 * u, cy + 7 * u, 2 * u, 2 * u);
+                    RoundRect(dc, cx - 6 * u, cy - 7 * u, cx - u, cy + 7 * u, 2 * u, 2 * u);
+                    RoundRect(dc, cx + u, cy - 7 * u, cx + 6 * u, cy + 7 * u, 2 * u, 2 * u);
                 } else {
                     tri(dc, cx - 4 * u, cy - 7 * u, cx + 6 * u, cy, cx - 4 * u, cy + 7 * u);
                 }
