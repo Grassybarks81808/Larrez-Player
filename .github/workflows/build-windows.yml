@@ -46,15 +46,52 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('native/Cargo.toml') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      # Both of these were allowed to fail from the start, which is the same as
+      # never running them. They stay non-blocking here only until the existing
+      # backlog is worked off; their output goes out as annotations meanwhile.
       - name: Check formatting
         working-directory: native
-        run: cargo fmt --check
         continue-on-error: true
+        run: |
+          function Publish([string]$level, [string]$title, [string]$text) {
+            $text = ($text -replace '%', '%25') -replace "`r", ''
+            $chunk = ''
+            $parts = [System.Collections.Generic.List[string]]::new()
+            foreach ($line in ($text -split "`n")) {
+              if (($chunk.Length + $line.Length) -gt 3000) { $parts.Add($chunk); $chunk = '' }
+              $chunk += $line + '%0A'
+            }
+            if ($chunk) { $parts.Add($chunk) }
+            for ($i = 0; $i -lt $parts.Count; $i++) {
+              Write-Host "::$level title=$title $($i + 1)/$($parts.Count)::$($parts[$i])"
+            }
+          }
+
+          $out = (cargo fmt --check 2>&1 | Out-String)
+          if ($LASTEXITCODE -eq 0) { Write-Host 'rustfmt is happy' }
+          else { Publish 'notice' 'rustfmt' $out; exit 1 }
 
       - name: Clippy
         working-directory: native
-        run: cargo clippy --release -- -D warnings
         continue-on-error: true
+        run: |
+          function Publish([string]$level, [string]$title, [string]$text) {
+            $text = ($text -replace '%', '%25') -replace "`r", ''
+            $chunk = ''
+            $parts = [System.Collections.Generic.List[string]]::new()
+            foreach ($line in ($text -split "`n")) {
+              if (($chunk.Length + $line.Length) -gt 3000) { $parts.Add($chunk); $chunk = '' }
+              $chunk += $line + '%0A'
+            }
+            if ($chunk) { $parts.Add($chunk) }
+            for ($i = 0; $i -lt $parts.Count; $i++) {
+              Write-Host "::$level title=$title $($i + 1)/$($parts.Count)::$($parts[$i])"
+            }
+          }
+
+          $out = (cargo clippy --release -- -D warnings 2>&1 | Out-String)
+          if ($LASTEXITCODE -eq 0) { Write-Host 'clippy is happy' }
+          else { Publish 'notice' 'clippy' $out; exit 1 }
 
       - name: Unit tests
         working-directory: native
@@ -268,8 +305,10 @@ jobs:
           # Application log. That is the one piece of evidence the player
           # cannot write itself.
           try {
-            $events = Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Id = 1000, 1001 } `
-                      -MaxEvents 8 -ErrorAction Stop
+            $events = Get-WinEvent -FilterHashtable @{
+                LogName = 'Application'
+                ProviderName = @('Application Error', 'Windows Error Reporting')
+              } -MaxEvents 8 -ErrorAction Stop
             foreach ($e in $events) {
               Announce 'notice' "event $($e.Id) at $($e.TimeCreated):`n$($e.Message)"
             }
