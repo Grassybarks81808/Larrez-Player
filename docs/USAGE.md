@@ -30,8 +30,33 @@ The folder must keep `mpv-2.dll` next to the `.exe` — that is the decode engin
 | `R` | Cycle repeat | `I` | Show position info |
 | `[` / `]` | Speed down / up | `H` | Help overlay |
 | `\` | Reset speed to 1× | `Q` | Quit |
+| `Tab` | Show / hide the playlist panel | | |
 
-Left-click the video to toggle pause.
+Left-click the video to toggle pause, and hides the controls.
+
+## The interface
+
+There is no title-bar toolbar and no chrome carved out of the video area. The
+controls are a card floating over the bottom of the picture, plus a playlist
+panel on the right, both drawn by the player and both transparent to clicks
+outside their rounded outline.
+
+In the bar: previous, −10s, play/pause, +10s, next; the time read-out; the
+volume slider; the speed chip; and buttons for the playlist panel, a screenshot,
+and fullscreen. The thin line above them is the scrub track — the dimmer part is
+what has been demuxed, the bright part is where you are. Click or drag it to
+seek; drag the volume knob, or roll the wheel over the bar, to mix.
+
+While a video is playing the whole thing fades out after a couple of seconds of
+an idle pointer and comes back when you move it. It stays put while paused, and
+while nothing is playing, so you are never chasing controls that vanished.
+
+`Tab` toggles the playlist panel. In it, a row plays on click, the wheel
+scrolls, **Open** is the file picker, and ✕ closes the panel.
+
+If the overlay cannot be created on some machine, the player logs
+`interface unavailable`, keeps playing, and keyboard control still works
+entirely on its own.
 
 ## File associations
 
