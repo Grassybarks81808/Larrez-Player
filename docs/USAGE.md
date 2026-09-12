@@ -57,6 +57,36 @@ Volume, mute, speed, shuffle, repeat, and resume positions are stored in:
 
 Delete that file to reset the player to defaults.
 
+The player also writes a log there:
+
+```
+%APPDATA%\LarrezPlayer\larrez.log
+```
+
+It holds what mpv itself reports — which video output it picked, whether
+hardware decoding came up, and any error that stopped the picture. It is the
+first thing to look at if something misbehaves, and it is what a bug report
+needs.
+
+## Command line
+
+Useful when a file association passes a path, or when you are diagnosing
+something:
+
+| Flag | What it does |
+| --- | --- |
+| `--verbose` | Log everything (mpv's detailed output included) |
+| `--safe-mode` | Software decoding, plain GPU path — for machines whose driver or GPU context misbehaves |
+| `--version` | Show the version |
+| `--help` | Show the shortcuts |
+
+```
+larrez-player.exe --verbose "D:\video.mkv"
+```
+
+`--verbose` needs a console to be useful for anything other than the log file,
+so from Explorer prefer reading `larrez.log`.
+
 ## Resume behaviour
 
 Positions are remembered per file path, but only when you are **more than 15
@@ -91,9 +121,26 @@ edit the defaults in `native/src/mpv.rs` and rebuild.
 **"Could not load libmpv"** — `mpv-2.dll` isn't beside the `.exe`. Re-extract the
 zip, keeping the files together.
 
+**The window is blank (white or black) and the video never appears** — the
+player starts its window before the video output has painted anything, so what
+you are seeing is the absence of a picture rather than a crash. In practice it
+means mpv could not start a video output on this machine:
+
+1. Try `larrez-player.exe --safe-mode` — software decoding on the plain GPU
+   path, which ignores the hardware-decoding and `gpu-next` paths entirely.
+2. Update your graphics driver. Hardware decoding (`D3D11VA`) and the
+   `gpu-next` renderer both go through it.
+3. Read `%APPDATA%\LarrezPlayer\larrez.log`. It names the video output mpv
+   tried and why it gave up, and the player now says so in a dialog as well.
+
 **Video is black but audio plays** — your GPU driver may not support the chosen
-hardware decoder for that codec. Rebuild with `hwdec=no` in `native/src/mpv.rs`
-to confirm, then update your graphics driver.
+hardware decoder for that codec. Run with `--safe-mode` to confirm, then update
+your graphics driver.
+
+**The window flashes white for a moment on a slow machine** — it shouldn't: the
+window is only shown once mpv owns it, and it is painted black before that. If
+you can still see it, the log file and a description of your GPU are welcome in
+a [bug report](https://github.com/Grassybarks81808/Larrez-Player/issues).
 
 **Windows SmartScreen warning** — the binary is unsigned (code-signing
 certificates cost money). Click **More info → Run anyway**, or build it yourself

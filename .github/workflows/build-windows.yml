@@ -126,6 +126,78 @@ jobs:
           if ($exeSize -lt 200KB) { throw "larrez-player.exe looks too small ($exeSize bytes)" }
           Write-Host 'Package verified.'
 
+      # The v0.1.0 release shipped a build nobody had ever *run*: PE checks
+      # can't tell you that the player exits the moment it starts. This does.
+      - name: Smoke test the app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $logFile = Join-Path $env:APPDATA 'LarrezPlayer\larrez.log'
+          $exe = (Resolve-Path 'dist/larrez-player.exe').Path
+
+          function Show-Log([string]$title) {
+            Write-Host "===== $title ====="
+            if (Test-Path $logFile) {
+              Get-Content $logFile | Select-Object -Last 250 | ForEach-Object { Write-Host $_ }
+            } else {
+              Write-Host "(no log file at $logFile)"
+            }
+          }
+
+          # Give it a real file to play so the decode path is covered too.
+          $clip = Join-Path $PWD 'smoke-clip.mp4'
+          if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
+            & ffmpeg -hide_banner -loglevel error -y `
+                -f lavfi -i "testsrc=size=320x240:rate=15:duration=3" `
+                -c:v libx264 -pix_fmt yuv420p $clip
+          }
+          $exeArgs = @('--verbose')
+          if (Test-Path $clip) {
+            $exeArgs += $clip
+          } else {
+            Write-Host '::warning::ffmpeg not available - testing the no-file path only'
+          }
+
+          # 1. It has to survive its own startup. This is the check that would
+          #    have caught a build dying on launch, white window and all.
+          Write-Host "launching: $exe $($exeArgs -join ' ')"
+          $proc = Start-Process -FilePath $exe -ArgumentList $exeArgs -PassThru
+          Start-Sleep -Seconds 15
+          if ($proc.HasExited) {
+            Show-Log 'log after early exit'
+            throw "larrez-player.exe exited on its own after 15s (exit code $($proc.ExitCode))"
+          }
+          Write-Host "still running after 15s (pid $($proc.Id))"
+          Show-Log 'log while running'
+
+          # A panic inside the player is a bug even if the process survives it
+          # (we show a dialog, which would otherwise keep this test green).
+          if (Test-Path $logFile) {
+            $fatal = Select-String -Path $logFile -Pattern '\[fatal\]|panicked at'
+            if ($fatal) {
+              throw "the app logged a fatal error: $fatal"
+            }
+          }
+
+          # 2. Closing the window has to bring the whole thing down cleanly.
+          #    (Soft check: a headless runner may not manage the window itself.)
+          if ($proc.CloseMainWindow()) {
+            if (-not $proc.WaitForExit(20000)) {
+              $proc.Kill()
+              Show-Log 'log after kill'
+              throw 'larrez-player.exe did not exit after its window was closed'
+            }
+            Show-Log 'log after shutdown'
+            Write-Host "exit code after closing the window: $($proc.ExitCode)"
+            if ($proc.ExitCode -ne 0) { throw "unexpected exit code $($proc.ExitCode)" }
+          } else {
+            Write-Host '::warning::no main window to close - killing the process instead'
+            $proc.Kill()
+            $proc.WaitForExit(10000)
+            Show-Log 'log after kill'
+          }
+          Write-Host 'smoke test complete'
+
       - name: Package zip
         shell: pwsh
         run: Compress-Archive -Path dist/* -DestinationPath LarrezPlayer-windows-x64.zip -Force
