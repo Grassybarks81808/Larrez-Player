@@ -312,10 +312,8 @@ fn run(args: &Args) -> Result<(), String> {
 
                             // We watch exactly one property, so anything
                             // arriving here is worth a line in a verbose log.
-                            MpvEvent::PropertyChange { name, value, .. } => {
-                                if verbose {
-                                    logging::log("debug", &format!("{name} is now {value:?}"));
-                                }
+                            MpvEvent::PropertyChange { name, value, .. } if verbose => {
+                                logging::log("debug", &format!("{name} is now {value:?}"));
                             }
 
                             MpvEvent::FileLoaded => {
@@ -370,10 +368,8 @@ fn run(args: &Args) -> Result<(), String> {
                                 break;
                             }
 
-                            MpvEvent::Other(id) => {
-                                if verbose {
-                                    logging::log("debug", &format!("unhandled mpv event {id}"));
-                                }
+                            MpvEvent::Other(id) if verbose => {
+                                logging::log("debug", &format!("unhandled mpv event {id}"));
                             }
 
                             _ => {}
