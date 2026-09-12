@@ -35,7 +35,10 @@ pub fn path_display() -> String {
 
 /// Open the log for this run and record that we started.
 pub fn init(verbose: bool) {
-    let sink = Sink { file: open_log_file(), verbose };
+    let sink = Sink {
+        file: open_log_file(),
+        verbose,
+    };
     let _ = SINK.set(Mutex::new(sink));
     log(
         "info",
@@ -56,7 +59,10 @@ fn open_log_file() -> Option<std::fs::File> {
     if let Some(dir) = p.parent() {
         std::fs::create_dir_all(dir).ok()?;
     }
-    if std::fs::metadata(&p).map(|m| m.len() > MAX_BYTES).unwrap_or(false) {
+    if std::fs::metadata(&p)
+        .map(|m| m.len() > MAX_BYTES)
+        .unwrap_or(false)
+    {
         let _ = std::fs::remove_file(&p);
     }
     OpenOptions::new().create(true).append(true).open(&p).ok()
@@ -116,10 +122,10 @@ pub fn install_panic_hook() {
         previous(info);
 
         #[cfg(windows)]
-        crate::win::message_box("Larrez Player hit an internal error", &format!(
-            "{info}\n\nThe details were written to:\n{}",
-            path_display()
-        ));
+        crate::win::message_box(
+            "Larrez Player hit an internal error",
+            &format!("{info}\n\nThe details were written to:\n{}", path_display()),
+        );
     }));
 }
 

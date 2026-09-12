@@ -197,11 +197,19 @@ pub enum Event {
     None,
     Shutdown,
     FileLoaded,
-    EndFile { reason: c_int, error: c_int },
+    EndFile {
+        reason: c_int,
+        error: c_int,
+    },
     VideoReconfig,
-    PropertyChange { id: u64, name: String, value: Value },
+    PropertyChange {
+        id: u64,
+        /// The log name of the property, for diagnostics.
+        name: String,
+        value: Value,
+    },
     Log(LogMessage),
-    /// An event this player does not care about.
+    /// An event this player does not care about, with mpv's id for the log.
     Other(c_int),
 }
 
@@ -224,30 +232,33 @@ fn load_api() -> Result<Api, String> {
         ));
     }
 
+    // Each symbol is spelled together with the type it will be called through,
+    // so a signature that drifts from the prototype above is a compile error
+    // here rather than an access violation at runtime.
     macro_rules! sym {
-        ($name:literal) => {{
+        ($name:literal => $ty:ty) => {{
             let c = CString::new($name).unwrap();
             let p = unsafe { sys::sym(handle, &c) };
             if p.is_null() {
                 return Err(format!("libmpv is missing symbol `{}` — version too old?", $name));
             }
-            unsafe { std::mem::transmute(p) }
+            unsafe { std::mem::transmute::<*mut c_void, $ty>(p) }
         }};
     }
 
     Ok(Api {
-        create: sym!("mpv_create"),
-        initialize: sym!("mpv_initialize"),
-        terminate: sym!("mpv_terminate_destroy"),
-        command: sym!("mpv_command"),
-        set_option_string: sym!("mpv_set_option_string"),
-        set_property: sym!("mpv_set_property"),
-        get_property: sym!("mpv_get_property"),
-        observe_property: sym!("mpv_observe_property"),
-        wait_event: sym!("mpv_wait_event"),
-        error_string: sym!("mpv_error_string"),
-        request_log_messages: sym!("mpv_request_log_messages"),
-        free: sym!("mpv_free"),
+        create: sym!("mpv_create" => FnCreate),
+        initialize: sym!("mpv_initialize" => FnInitialize),
+        terminate: sym!("mpv_terminate_destroy" => FnTerminate),
+        command: sym!("mpv_command" => FnCommand),
+        set_option_string: sym!("mpv_set_option_string" => FnSetOptionString),
+        set_property: sym!("mpv_set_property" => FnSetProperty),
+        get_property: sym!("mpv_get_property" => FnGetProperty),
+        observe_property: sym!("mpv_observe_property" => FnObserveProperty),
+        wait_event: sym!("mpv_wait_event" => FnWaitEvent),
+        error_string: sym!("mpv_error_string" => FnErrorString),
+        request_log_messages: sym!("mpv_request_log_messages" => FnRequestLogMessages),
+        free: sym!("mpv_free" => FnFree),
         _lib: DynLib(handle),
     })
 }
@@ -330,7 +341,8 @@ impl Mpv {
         // Don't let mpv spawn its own terminal handlers or config surprises.
         // In verbose mode we *do* want mpv talking, since a user running from a
         // console is usually doing it to read the log.
-        mpv.set_option("terminal", if config.verbose { "yes" } else { "no" }).ok();
+        mpv.set_option("terminal", if config.verbose { "yes" } else { "no" })
+            .ok();
         mpv.set_option("input-default-bindings", "no").ok();
         mpv.set_option("input-vo-keyboard", "no").ok();
         mpv.set_option("osc", "no").ok();
@@ -406,7 +418,12 @@ impl Mpv {
         let c = CString::new(name).map_err(|e| e.to_string())?;
         let mut v: c_int = if on { 1 } else { 0 };
         let rc = unsafe {
-            (self.api.set_property)(self.ctx, c.as_ptr(), MPV_FORMAT_FLAG, &mut v as *mut _ as *mut c_void)
+            (self.api.set_property)(
+                self.ctx,
+                c.as_ptr(),
+                MPV_FORMAT_FLAG,
+                &mut v as *mut _ as *mut c_void,
+            )
         };
         self.check(rc, &format!("set_flag({name})"))
     }
@@ -415,7 +432,12 @@ impl Mpv {
         let c = CString::new(name).map_err(|e| e.to_string())?;
         let mut v = val;
         let rc = unsafe {
-            (self.api.set_property)(self.ctx, c.as_ptr(), MPV_FORMAT_DOUBLE, &mut v as *mut _ as *mut c_void)
+            (self.api.set_property)(
+                self.ctx,
+                c.as_ptr(),
+                MPV_FORMAT_DOUBLE,
+                &mut v as *mut _ as *mut c_void,
+            )
         };
         self.check(rc, &format!("set_double({name})"))
     }
@@ -424,7 +446,12 @@ impl Mpv {
         let c = CString::new(name).ok()?;
         let mut v: f64 = 0.0;
         let rc = unsafe {
-            (self.api.get_property)(self.ctx, c.as_ptr(), MPV_FORMAT_DOUBLE, &mut v as *mut _ as *mut c_void)
+            (self.api.get_property)(
+                self.ctx,
+                c.as_ptr(),
+                MPV_FORMAT_DOUBLE,
+                &mut v as *mut _ as *mut c_void,
+            )
         };
         (rc >= 0).then_some(v)
     }
@@ -433,7 +460,12 @@ impl Mpv {
         let c = CString::new(name).ok()?;
         let mut v: c_int = 0;
         let rc = unsafe {
-            (self.api.get_property)(self.ctx, c.as_ptr(), MPV_FORMAT_FLAG, &mut v as *mut _ as *mut c_void)
+            (self.api.get_property)(
+                self.ctx,
+                c.as_ptr(),
+                MPV_FORMAT_FLAG,
+                &mut v as *mut _ as *mut c_void,
+            )
         };
         (rc >= 0).then_some(v != 0)
     }
@@ -442,7 +474,12 @@ impl Mpv {
         let c = CString::new(name).ok()?;
         let mut v: i64 = 0;
         let rc = unsafe {
-            (self.api.get_property)(self.ctx, c.as_ptr(), MPV_FORMAT_INT64, &mut v as *mut _ as *mut c_void)
+            (self.api.get_property)(
+                self.ctx,
+                c.as_ptr(),
+                MPV_FORMAT_INT64,
+                &mut v as *mut _ as *mut c_void,
+            )
         };
         (rc >= 0).then_some(v)
     }
@@ -509,13 +546,15 @@ impl Mpv {
                         MPV_FORMAT_FLAG => Value::Flag(unsafe { *(payload as *const c_int) } != 0),
                         MPV_FORMAT_INT64 => Value::Int(unsafe { *(payload as *const i64) }),
                         MPV_FORMAT_DOUBLE => Value::Double(unsafe { *(payload as *const c_double) }),
-                        MPV_FORMAT_STRING => unsafe {
-                            Value::Text(cstr(*(payload as *const *const c_char)))
-                        },
+                        MPV_FORMAT_STRING => unsafe { Value::Text(cstr(*(payload as *const *const c_char))) },
                         _ => Value::None,
                     }
                 };
-                Event::PropertyChange { id: userdata, name, value }
+                Event::PropertyChange {
+                    id: userdata,
+                    name,
+                    value,
+                }
             }
             MPV_EVENT_LOG_MESSAGE => {
                 if data.is_null() {
@@ -614,7 +653,9 @@ impl Mpv {
     pub fn video_state(&self) -> String {
         let vo = self.get_string("current-vo").unwrap_or_else(|| "?".into());
         let hwdec = self.get_string("hwdec-current").unwrap_or_else(|| "no".into());
-        let fmt = self.get_string("video-params/pixelformat").unwrap_or_else(|| "?".into());
+        let fmt = self
+            .get_string("video-params/pixelformat")
+            .unwrap_or_else(|| "?".into());
         let w = self.get_int64("width").unwrap_or(0);
         let h = self.get_int64("height").unwrap_or(0);
         frame_summary(&vo, &hwdec, &fmt, w, h)

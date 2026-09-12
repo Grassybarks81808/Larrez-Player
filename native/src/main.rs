@@ -151,9 +151,15 @@ fn run(args: &Args) -> Result<(), String> {
     logging::log("info", &format!("startup: window id 0x{wid:X}, loading libmpv"));
     let mut player = Mpv::new(
         wid,
-        mpv::Config { verbose: args.verbose, safe_mode: args.safe_mode },
+        mpv::Config {
+            verbose: args.verbose,
+            safe_mode: args.safe_mode,
+        },
     )?;
-    logging::log("info", &format!("startup: mpv ready, embedding in window 0x{wid:X}"));
+    logging::log(
+        "info",
+        &format!("startup: mpv ready, embedding in window 0x{wid:X}"),
+    );
     if args.safe_mode {
         logging::log("info", "safe mode: hardware decoding off, plain GPU path");
     }
@@ -199,6 +205,7 @@ fn run(args: &Args) -> Result<(), String> {
     let mut vo_ready = false;
     let mut vo_reported = false;
     let mut loaded_at: Option<Instant> = None;
+    let verbose = args.verbose;
 
     event_loop
         .run(move |event, elwt| {
@@ -234,14 +241,22 @@ fn run(args: &Args) -> Result<(), String> {
                         }
                     }
 
-                    WindowEvent::MouseInput { state: st, button, .. } => {
+                    WindowEvent::MouseInput {
+                        state: st, button, ..
+                    } => {
                         if st == ElementState::Pressed && button == MouseButton::Left {
                             player.toggle_pause();
                         }
                     }
 
                     WindowEvent::KeyboardInput {
-                        event: KeyEvent { logical_key, state: ElementState::Pressed, repeat: false, .. },
+                        event:
+                            KeyEvent {
+                                logical_key,
+                                state: ElementState::Pressed,
+                                repeat: false,
+                                ..
+                            },
                         ..
                     } => {
                         handle_key(
@@ -274,23 +289,32 @@ fn run(args: &Args) -> Result<(), String> {
                                 }
                             }
 
-                            MpvEvent::PropertyChange { id, value, .. }
-                                if id == PROP_VO_CONFIGURED =>
-                            {
+                            MpvEvent::PropertyChange { id, value, .. } if id == PROP_VO_CONFIGURED => {
                                 match value {
                                     Value::Flag(true) => {
                                         if !vo_ready {
                                             vo_ready = true;
                                             vo_reported = false;
-                                            logging::log("info", &format!(
-                                                "video output ready after {} ms ({})",
-                                                started.elapsed().as_millis(),
-                                                player.video_state()
-                                            ));
+                                            logging::log(
+                                                "info",
+                                                &format!(
+                                                    "video output ready after {} ms ({})",
+                                                    started.elapsed().as_millis(),
+                                                    player.video_state()
+                                                ),
+                                            );
                                         }
                                     }
                                     Value::Flag(false) => vo_ready = false,
                                     _ => {}
+                                }
+                            }
+
+                            // We watch exactly one property, so anything
+                            // arriving here is worth a line in a verbose log.
+                            MpvEvent::PropertyChange { name, value, .. } => {
+                                if verbose {
+                                    logging::log("debug", &format!("{name} is now {value:?}"));
                                 }
                             }
 
@@ -307,10 +331,7 @@ fn run(args: &Args) -> Result<(), String> {
                             }
 
                             MpvEvent::EndFile { reason, error } => {
-                                let name = pl
-                                    .current_entry()
-                                    .map(|e| e.name.clone())
-                                    .unwrap_or_default();
+                                let name = pl.current_entry().map(|e| e.name.clone()).unwrap_or_default();
                                 if let Some(e) = pl.current_entry() {
                                     let p = e.path.clone();
                                     state.remember(&p, 0.0, 1.0); // clear on completion
@@ -320,10 +341,13 @@ fn run(args: &Args) -> Result<(), String> {
                                     // Don't race through the playlist skipping
                                     // broken files: say which one failed and
                                     // let the user press N.
-                                    logging::log("error", &format!(
-                                        "{name}: playback failed — {} (reason {reason})",
-                                        player.error_text(error)
-                                    ));
+                                    logging::log(
+                                        "error",
+                                        &format!(
+                                            "{name}: playback failed — {} (reason {reason})",
+                                            player.error_text(error)
+                                        ),
+                                    );
                                     loaded_at = None;
                                     player.show_text(&format!(
                                         "Could not play {name} — press N for the next file"
@@ -346,6 +370,12 @@ fn run(args: &Args) -> Result<(), String> {
                                 break;
                             }
 
+                            MpvEvent::Other(id) => {
+                                if verbose {
+                                    logging::log("debug", &format!("unhandled mpv event {id}"));
+                                }
+                            }
+
                             _ => {}
                         }
                     }
@@ -360,7 +390,9 @@ fn run(args: &Args) -> Result<(), String> {
                     // screen means the video output is not coming. Say it once.
                     if !vo_ready
                         && !vo_reported
-                        && loaded_at.map(|t| t.elapsed() > VIDEO_OUTPUT_GRACE).unwrap_or(false)
+                        && loaded_at
+                            .map(|t| t.elapsed() > VIDEO_OUTPUT_GRACE)
+                            .unwrap_or(false)
                     {
                         vo_reported = true;
                         report_no_video_output("no video output after loading a file");
@@ -546,7 +578,10 @@ fn adjust_speed(player: &Mpv, state: &mut State, delta: f64) {
 
 fn open_dialog(player: &Mpv, pl: &mut Playlist, state: &State, folder: bool) {
     let picked: Vec<PathBuf> = if folder {
-        rfd::FileDialog::new().pick_folder().map(|d| vec![d]).unwrap_or_default()
+        rfd::FileDialog::new()
+            .pick_folder()
+            .map(|d| vec![d])
+            .unwrap_or_default()
     } else {
         rfd::FileDialog::new()
             .add_filter("Video files", playlist::VIDEO_EXTS)
@@ -596,7 +631,9 @@ fn persist(player: &Mpv, pl: &mut Playlist, state: &mut State) {
 }
 
 fn name_of(p: &std::path::Path) -> String {
-    p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
+    p.file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// Extract the platform window id that mpv embeds into.
@@ -618,8 +655,7 @@ fn window_id(window: &Window) -> Result<i64, String> {
         RawWindowHandle::Xlib(h) => Ok(h.window as i64),
         #[cfg(not(windows))]
         RawWindowHandle::Wayland(_) => Err(
-            "Wayland embedding is not supported yet — run with WAYLAND_DISPLAY unset to use X11."
-                .to_string(),
+            "Wayland embedding is not supported yet — run with WAYLAND_DISPLAY unset to use X11.".to_string(),
         ),
         other => Err(format!("Unsupported window system: {other:?}")),
     }
@@ -650,7 +686,9 @@ mod tests {
 
     #[test]
     fn fatal_video_output_messages_are_recognised() {
-        assert!(video_output_died("[vo/gpu-next/win32] unable to create window!\n"));
+        assert!(video_output_died(
+            "[vo/gpu-next/win32] unable to create window!\n"
+        ));
         assert!(video_output_died("Video output failed.\n"));
         assert!(!video_output_died("[cplayer] Track switched\n"));
         assert!(!video_output_died("[vo/gpu-next] Using display sync\n"));
