@@ -1537,7 +1537,7 @@ mod platform {
         let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
         let audio = ["mp3", "mp2", "m4a", "aac", "wav", "wave", "flac", "ogg", "oga", "opus", "wma", "aif", "aiff", "ape", "alac", "ac3", "dts", "mka", "mid", "midi", "caf", "tta", "wv"].contains(&ext.as_str());
         text(dc, Rect::new(icon.l, icon.t, icon.r, icon.b), if audio { "♫" } else { "▶" }, if audio { 16 * s } else { 12 * s }, FW_SEMIBOLD, C_ACCENT);
-        text(dc, Rect::new(icon.r - 9 * s, icon.b - 9 * s, icon.r - 1 * s, icon.b - 1 * s), "L", 7 * s, FW_SEMIBOLD, C_TEXT);
+        text(dc, Rect::new(icon.r - 9 * s, icon.b - 9 * s, icon.r - s, icon.b - s), "L", 7 * s, FW_SEMIBOLD, C_TEXT);
 
         SetTextColor(dc, color);
         let mut body = Rect::new(icon.r + 8 * s, r.t, r.r - 10 * s, r.b);
