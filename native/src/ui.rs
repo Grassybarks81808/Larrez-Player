@@ -307,14 +307,14 @@ mod platform {
     const KEY: u32 = 0x0000_0000;
     const C_TEXT: u32 = rgb(0xE8, 0xEC, 0xF4);
     const C_MUTED: u32 = rgb(0x8B, 0x93, 0xA7);
-    const C_ACCENT: u32 = rgb(0xFF, 0x8A, 0x3D);
-    const C_ON_ACCENT: u32 = rgb(0x1A, 0x0E, 0x04);
+    const C_ACCENT: u32 = rgb(0xFF, 0x24, 0x38);
+    const C_ON_ACCENT: u32 = rgb(0xFF, 0xFF, 0xFF);
     const C_PILL: u32 = rgb(0x14, 0x17, 0x1E);
     const C_LINE: u32 = rgb(0x2A, 0x31, 0x40);
     const C_HOVER: u32 = rgb(0x24, 0x2A, 0x36);
     const C_PRESS: u32 = rgb(0x33, 0x3B, 0x4C);
     const C_TRACK: u32 = rgb(0x39, 0x41, 0x53);
-    const C_BUFFER: u32 = rgb(0x6B, 0x54, 0x3C);
+    const C_BUFFER: u32 = rgb(0x73, 0x1D, 0x2A);
 
     /// COLORREF is 0x00BBGGRR; building it from R, G, B names removes the
     /// temptation to write a literal backwards.
