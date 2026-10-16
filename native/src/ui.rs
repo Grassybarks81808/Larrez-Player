@@ -1305,6 +1305,16 @@ mod platform {
         let s = l.scale;
         card(dc, l.pill, 26 * s);
         draw_brand_badge(dc, l.pill, s);
+        
+    unsafe fn draw_brand_badge(dc: Hwnd, bar: Rect, s: c_int) {
+    let pad = 12 * s;
+    let w = 48 * s;
+    let h = 28 * s;
+    let r = Rect::new(bar.l + pad, bar.b - pad - h, bar.l + pad + w, bar.b - pad);
+    paint_round(dc, r, C_ACCENT, 10 * s);
+    let inner = Rect::new(r.l + (4 * s), r.t + (3 * s), r.r - (4 * s), r.b - (3 * s));
+    text(dc, inner, "L", 13 * s, FW_SEMIBOLD, C_ON_ACCENT);
+    } 
 
         // Scrub: track, then what has been demuxed, then what has been played,
         // then the head. The head grows under the pointer — the only reason the
