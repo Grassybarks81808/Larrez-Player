@@ -1,7 +1,7 @@
 import './style.css';
 import { fmtTime, srtToVtt } from './formats';
 import {
-  trackFromFile, trackFromUrl, subtitleLine, isVideoFile, sortByName,
+  trackFromFile, trackFromUrl, subtitleLine, isMediaFile, isAudioFile, sortByName,
   type Track,
 } from './playlist';
 
@@ -132,6 +132,12 @@ function renderPlaylist(): void {
     li.dataset.index = String(i);
     li.title = `${t.name}\n${t.info.note}`;
 
+    const art = document.createElement('span');
+    const audio = isAudioFile(t.file ?? t.name);
+    art.className = `pl-thumb ${audio ? 'audio' : 'video'}`;
+    art.setAttribute('aria-hidden', 'true');
+    art.innerHTML = `<span class="pl-thumb-glyph">${audio ? '♫' : '▶'}</span><span class="pl-thumb-brand">L</span>`;
+
     const idx = document.createElement('span');
     idx.className = 'pl-idx';
     idx.textContent = String(i + 1);
@@ -155,7 +161,7 @@ function renderPlaylist(): void {
     x.title = 'Remove from playlist';
     x.addEventListener('click', (e) => { e.stopPropagation(); removeAt(i); });
 
-    li.append(idx, body, x);
+    li.append(art, idx, body, x);
     li.addEventListener('click', () => play(i));
 
     li.addEventListener('dragstart', () => { dragFrom = i; });
@@ -213,21 +219,23 @@ function updateNavButtons(): void {
  * Adding media
  * ------------------------------------------------------------------ */
 function addFiles(files: File[]): void {
-  const vids = files.filter(isVideoFile);
-  const skipped = files.length - vids.length;
-  if (vids.length === 0) {
-    toast(skipped ? 'No playable video files in that selection.' : 'Nothing to add.', true);
+  const media = files.filter(isMediaFile);
+  const skipped = files.length - media.length;
+  if (media.length === 0) {
+    toast(skipped ? 'No supported video or music files in that selection.' : 'Nothing to add.', true);
     return;
   }
 
   const startEmpty = tracks.length === 0;
-  const added = vids.map(trackFromFile).sort(sortByName);
+  const added = media.map(trackFromFile).sort(sortByName);
   tracks.push(...added);
   renderPlaylist();
 
   const bad = added.filter((t) => t.info.support === 'unsupported').length;
-  let msg = `Added ${added.length} file${added.length > 1 ? 's' : ''}`;
-  if (skipped) msg += ` (skipped ${skipped} non-video)`;
+  const audioCount = added.filter((t) => isAudioFile(t.file ?? t.name)).length;
+  const videoCount = added.length - audioCount;
+  let msg = `Added ${added.length} media file${added.length > 1 ? 's' : ''} (${videoCount} video${videoCount === 1 ? '' : 's'}, ${audioCount} audio)`;
+  if (skipped) msg += ` (skipped ${skipped} unsupported)`;
   if (bad) msg += ` — ${bad} need the native build`;
   toast(msg, bad > 0);
 
@@ -572,6 +580,10 @@ video.addEventListener('loadedmetadata', () => {
     } catch {
       thumb.hidden = true;
     }
+  } else if (t && isAudioFile(t.file ?? t.name)) {
+    const artwork = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#29212b"/><stop offset="1" stop-color="#10131b"/></linearGradient></defs><rect width="160" height="100" rx="10" fill="url(#g)"/><circle cx="80" cy="48" r="28" fill="#ff8a3d" opacity=".16"/><path d="M88 26v36a12 12 0 1 1-7-11V34l27-6v27a12 12 0 1 1-7-11V22z" fill="#ff8a3d"/><text x="151" y="91" text-anchor="end" font-family="Segoe UI,Arial" font-size="12" font-weight="700" fill="#ff8a3d">LARREZ</text></svg>`;
+    thumb.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(artwork)}`;
+    thumb.hidden = false;
   } else {
     thumb.hidden = true;
   }
