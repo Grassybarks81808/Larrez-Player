@@ -126,7 +126,7 @@ function queueThumbnail(t: Track, art: HTMLElement): void {
     img.alt = '';
     img.setAttribute('aria-hidden', 'true');
     img.src = src;
-    art.replaceChildren(img);
+    art.prepend(img);
   };
   const cached = thumbnailCache.get(t.id);
   if (cached) { show(cached); return; }
