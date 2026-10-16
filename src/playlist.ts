@@ -49,9 +49,20 @@ export function subtitleLine(t: Track): string {
 }
 
 const VIDEO_RE = /\.(mp4|m4v|mov|webm|ogv|ogg|mkv|avi|ts|m2ts|flv|wmv|mpe?g|3gp)$/i;
+const AUDIO_RE = /\.(mp3|mp2|m4a|aac|wav|wave|flac|opus|oga|ogg|aif|aiff|wma)$/i;
+
+export function isAudioFile(file: File | string): boolean {
+  const name = typeof file === 'string' ? file : file.name;
+  const type = typeof file === 'string' ? '' : file.type;
+  return type.startsWith('audio/') || AUDIO_RE.test(name);
+}
 
 export function isVideoFile(f: File): boolean {
   return f.type.startsWith('video/') || VIDEO_RE.test(f.name);
+}
+
+export function isMediaFile(f: File): boolean {
+  return isVideoFile(f) || isAudioFile(f);
 }
 
 /** Natural sort so "ep2" comes before "ep10". */
