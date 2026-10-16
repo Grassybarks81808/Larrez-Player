@@ -114,7 +114,7 @@ const thumbnailCache = new Map<string, string>();
 const thumbnailPending = new Set<string>();
 
 function audioArtwork(): string {
-  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#39251f"/><stop offset="1" stop-color="#17121b"/></linearGradient></defs><rect width="160" height="100" rx="10" fill="url(#g)"/><circle cx="80" cy="46" r="29" fill="#ff8a3d" opacity=".16"/><path d="M88 22v38a12 12 0 1 1-7-11V30l27-6v29a12 12 0 1 1-7-11V18z" fill="#ff8a3d"/><text x="151" y="91" text-anchor="end" font-family="Segoe UI,Arial" font-size="12" font-weight="700" fill="#ff8a3d">LARREZ</text></svg>';
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#321018"/><stop offset="1" stop-color="#110b11"/></linearGradient></defs><rect width="160" height="100" rx="10" fill="url(#g)"/><circle cx="80" cy="46" r="29" fill="#ff2438" opacity=".16"/><path d="M88 22v38a12 12 0 1 1-7-11V30l27-6v29a12 12 0 1 1-7-11V18z" fill="#ff2438"/><text x="151" y="91" text-anchor="end" font-family="Segoe UI,Arial" font-size="12" font-weight="700" fill="#ff2438">LARREZ</text></svg>';
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
 
@@ -633,7 +633,7 @@ video.addEventListener('loadedmetadata', () => {
       thumb.hidden = true;
     }
   } else if (t && isAudioFile(t.file ?? t.name)) {
-    const artwork = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#29212b"/><stop offset="1" stop-color="#10131b"/></linearGradient></defs><rect width="160" height="100" rx="10" fill="url(#g)"/><circle cx="80" cy="48" r="28" fill="#ff8a3d" opacity=".16"/><path d="M88 26v36a12 12 0 1 1-7-11V34l27-6v27a12 12 0 1 1-7-11V22z" fill="#ff8a3d"/><text x="151" y="91" text-anchor="end" font-family="Segoe UI,Arial" font-size="12" font-weight="700" fill="#ff8a3d">LARREZ</text></svg>`;
+    const artwork = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#29212b"/><stop offset="1" stop-color="#10131b"/></linearGradient></defs><rect width="160" height="100" rx="10" fill="url(#g)"/><circle cx="80" cy="48" r="28" fill="#ff2438" opacity=".16"/><path d="M88 26v36a12 12 0 1 1-7-11V34l27-6v27a12 12 0 1 1-7-11V22z" fill="#ff2438"/><text x="151" y="91" text-anchor="end" font-family="Segoe UI,Arial" font-size="12" font-weight="700" fill="#ff2438">LARREZ</text></svg>`;
     thumb.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(artwork)}`;
     thumb.hidden = false;
   } else {
