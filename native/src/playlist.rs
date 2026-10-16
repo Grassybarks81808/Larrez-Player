@@ -21,6 +21,24 @@ pub fn is_video(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+
+/// Common audio formats handled by libmpv/FFmpeg.
+pub const AUDIO_EXTS: &[&str] = &[
+    "mp3", "mp2", "m4a", "aac", "wav", "wave", "flac", "ogg", "oga", "opus", "wma",
+    "aif", "aiff", "ape", "alac", "ac3", "dts", "mka", "mid", "midi", "caf", "tta", "wv",
+];
+
+pub fn is_audio(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| AUDIO_EXTS.contains(&e.to_ascii_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+pub fn is_media(path: &Path) -> bool {
+    is_video(path) || is_audio(path)
+}
+
 pub fn is_subtitle(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
@@ -79,7 +97,7 @@ pub struct Playlist {
 }
 
 impl Playlist {
-    /// Add paths; directories are walked one level deep for video files.
+    /// Add paths; directories are walked one level deep for supported media files.
     pub fn add_paths(&mut self, paths: &[PathBuf]) -> usize {
         let mut added = Vec::new();
         for p in paths {
@@ -87,12 +105,12 @@ impl Playlist {
                 if let Ok(rd) = std::fs::read_dir(p) {
                     let mut batch: Vec<PathBuf> = rd
                         .filter_map(|e| e.ok().map(|e| e.path()))
-                        .filter(|p| is_video(p))
+                        .filter(|p| is_media(p))
                         .collect();
                     batch.sort_by(|a, b| natural_cmp(&a.to_string_lossy(), &b.to_string_lossy()));
                     added.extend(batch);
                 }
-            } else if is_video(p) {
+            } else if is_media(p) {
                 added.push(p.clone());
             }
         }
@@ -281,6 +299,10 @@ mod tests {
     fn recognises_containers() {
         assert!(is_video(Path::new("a.mkv")));
         assert!(is_video(Path::new("A.AVI")));
+        assert!(is_audio(Path::new("song.MP3")));
+        assert!(is_audio(Path::new("song.flac")));
+        assert!(is_media(Path::new("song.mp3")));
+        assert!(!is_media(Path::new("notes.txt")));
         assert!(!is_video(Path::new("a.txt")));
         assert!(is_subtitle(Path::new("a.srt")));
     }
