@@ -36,6 +36,9 @@ const MIME_BY_EXT: Record<string, string> = {
   mp3: 'audio/mpeg', mp2: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac',
   wav: 'audio/wav', wave: 'audio/wav', flac: 'audio/flac', opus: 'audio/ogg',
   oga: 'audio/ogg', aif: 'audio/aiff', aiff: 'audio/aiff', wma: 'audio/x-ms-wma',
+  ape: 'audio/ape', alac: 'audio/mp4', ac3: 'audio/ac3', dts: 'audio/vnd.dts',
+  mka: 'audio/x-matroska', mid: 'audio/midi', midi: 'audio/midi', caf: 'audio/x-caf',
+  tta: 'audio/x-tta', wv: 'audio/wav',
 };
 
 const CONTAINER: Record<string, string> = {
@@ -47,6 +50,9 @@ const CONTAINER: Record<string, string> = {
   mp3: 'MP3 audio', mp2: 'MPEG audio', m4a: 'MPEG-4 audio', aac: 'AAC audio',
   wav: 'WAV audio', wave: 'WAV audio', flac: 'FLAC audio', opus: 'Opus audio',
   oga: 'Ogg audio', aif: 'AIFF audio', aiff: 'AIFF audio', wma: 'Windows Media Audio',
+  ape: 'APE audio', alac: 'ALAC audio', ac3: 'Dolby Digital audio', dts: 'DTS audio',
+  mka: 'Matroska audio', mid: 'MIDI audio', midi: 'MIDI audio', caf: 'Core Audio',
+  tta: 'True Audio', wv: 'WavPack audio',
 };
 
 /** Containers the browser will essentially never play without a real demuxer. */

@@ -49,7 +49,7 @@ export function subtitleLine(t: Track): string {
 }
 
 const VIDEO_RE = /\.(mp4|m4v|mov|webm|ogv|ogg|mkv|avi|ts|m2ts|flv|wmv|mpe?g|3gp)$/i;
-const AUDIO_RE = /\.(mp3|mp2|m4a|aac|wav|wave|flac|opus|oga|ogg|aif|aiff|wma)$/i;
+const AUDIO_RE = /\.(mp3|mp2|m4a|aac|wav|wave|flac|opus|oga|ogg|aif|aiff|wma|ape|alac|ac3|dts|mka|mid|midi|caf|tta|wv)$/i;
 
 export function isAudioFile(file: File | string): boolean {
   const name = typeof file === 'string' ? file : file.name;

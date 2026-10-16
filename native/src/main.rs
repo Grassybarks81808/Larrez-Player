@@ -35,7 +35,7 @@ mod ui;
 mod win;
 
 use mpv::{Event as MpvEvent, Mpv, Value};
-use playlist::{fmt_time, is_subtitle, Playlist, Repeat, State};
+use playlist::{fmt_time, is_audio, is_subtitle, Playlist, Repeat, State};
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use std::ffi::OsString;
 use std::io::Write;
@@ -310,7 +310,11 @@ fn run(args: &Args) -> Result<(), String> {
                                 logging::log_mpv(&msg.level, &msg.prefix, &msg.text);
                                 // No picture has ever appeared and mpv is
                                 // telling us why: stop pretending all is well.
-                                if !vo_ready && !vo_reported && video_output_died(&msg.text) {
+                                if !vo_ready
+                                    && !vo_reported
+                                    && !pl.current_entry().map(|e| is_audio(&e.path)).unwrap_or(false)
+                                    && video_output_died(&msg.text)
+                                {
                                     vo_reported = true;
                                     report_no_video_output(msg.text.trim());
                                 }
@@ -414,6 +418,7 @@ fn run(args: &Args) -> Result<(), String> {
                     // screen means the video output is not coming. Say it once.
                     if !vo_ready
                         && !vo_reported
+                        && !pl.current_entry().map(|e| is_audio(&e.path)).unwrap_or(false)
                         && loaded_at
                             .map(|t| t.elapsed() > VIDEO_OUTPUT_GRACE)
                             .unwrap_or(false)
