@@ -7,9 +7,6 @@ on:
         description: "Release tag (for example v0.3.0)"
         required: true
         type: string
-  push:
-    tags:
-      - "v*"
 
 permissions:
   contents: write
