@@ -33,8 +33,10 @@ pub const MPV_EVENT_FILE_LOADED: c_int = 8;
 pub const MPV_EVENT_VIDEO_RECONFIG: c_int = 17;
 pub const MPV_EVENT_PROPERTY_CHANGE: c_int = 22;
 
-/// The `mpv_end_file_reason` value that means "this file did not play"
-/// (0 = end of file, 2 = stopped, 3 = quit, 5 = redirect).
+/// The `mpv_end_file_reason` values used here: EOF is natural completion;
+/// ERROR means playback failed. STOP (2), QUIT (3), and REDIRECT (5) are not
+/// natural completion and must never trigger playlist auto-advance.
+pub const MPV_END_FILE_REASON_EOF: c_int = 0;
 pub const MPV_END_FILE_REASON_ERROR: c_int = 4;
 
 #[repr(C)]

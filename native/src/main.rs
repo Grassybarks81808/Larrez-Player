@@ -200,7 +200,7 @@ fn run(args: &Args) -> Result<(), String> {
     if !args.files.is_empty() {
         pl.add_paths(&args.files);
         if !pl.items.is_empty() {
-            open_index(&player, &mut pl, &state, 0);
+            open_index(&player, &mut pl, &mut state, 0);
         }
     } else {
         player.show_text("Larrez Player — press O to open a file, H for help");
@@ -247,14 +247,14 @@ fn run(args: &Args) -> Result<(), String> {
                             player.add_subtitle_file(&path.to_string_lossy());
                             player.show_text(&format!("Subtitles: {}", name_of(&path)));
                         } else {
-                            let was_empty = pl.items.is_empty();
+                            let first_new = pl.items.len();
                             let n = pl.add_paths(&[path]);
                             if n > 0 {
                                 player.show_text(&format!("Added {n} media file(s)"));
                                 publish_playlist(&pl);
-                                if was_empty {
-                                    open_index(&player, &mut pl, &state, 0);
-                                }
+                                // Play the dropped file now instead of queuing it
+                                // behind whatever is currently playing.
+                                open_index(&player, &mut pl, &mut state, first_new);
                             }
                         }
                     }
@@ -361,9 +361,17 @@ fn run(args: &Args) -> Result<(), String> {
 
                             MpvEvent::EndFile { reason, error } => {
                                 let name = pl.current_entry().map(|e| e.name.clone()).unwrap_or_default();
-                                if let Some(e) = pl.current_entry() {
-                                    let p = e.path.clone();
-                                    state.remember(&p, 0.0, 1.0); // clear on completion
+
+                                // Only natural EOF is a completion. Replacing a file
+                                // with loadfile emits STOP for the old file; treating
+                                // that as completion used to auto-advance away from
+                                // the file the user had just opened.
+                                let ended_naturally = should_advance_after_end_file(reason);
+                                if ended_naturally {
+                                    if let Some(e) = pl.current_entry() {
+                                        let p = e.path.clone();
+                                        state.remember(&p, 0.0, 1.0); // clear on completion
+                                    }
                                 }
 
                                 if reason == mpv::MPV_END_FILE_REASON_ERROR {
@@ -381,12 +389,19 @@ fn run(args: &Args) -> Result<(), String> {
                                     player.show_text(&format!(
                                         "Could not play {name} — press N for the next file"
                                     ));
-                                } else {
+                                } else if ended_naturally {
+                                    // Only a genuine end-of-file advances the playlist
+                                    // automatically; manual stops/replacements do not.
                                     logging::log("info", &format!("finished {name} (reason {reason})"));
                                     match pl.next_index(true) {
-                                        Some(n) => open_index(&player, &mut pl, &state, n),
+                                        Some(n) => open_index(&player, &mut pl, &mut state, n),
                                         None => player.show_text("End of playlist"),
                                     }
+                                } else {
+                                    logging::log(
+                                        "debug",
+                                        &format!("end-file for {name} ignored (reason {reason})"),
+                                    );
                                 }
                             }
 
@@ -687,6 +702,12 @@ N/P next-prev   S shuffle   R repeat   [ ] speed   \\ reset speed\n\
 O open file   D open folder   C screenshot   I info   Q quit\n\
 Start with --verbose to log everything, --safe-mode to avoid GPU paths";
 
+/// Only a natural EOF should move the playlist forward automatically.
+/// `loadfile ... replace` ends the old item with STOP, not EOF.
+fn should_advance_after_end_file(reason: i32) -> bool {
+    reason == mpv::MPV_END_FILE_REASON_EOF
+}
+
 /// Messages from mpv that mean there is never going to be a picture.
 fn video_output_died(message: &str) -> bool {
     let m = message.to_ascii_lowercase();
@@ -724,7 +745,7 @@ fn adjust_speed(player: &Mpv, state: &mut State, delta: f64) {
     player.show_text(&format!("Speed {:.2}x", state.speed));
 }
 
-fn open_dialog(player: &Mpv, pl: &mut Playlist, state: &State, folder: bool) {
+fn open_dialog(player: &Mpv, pl: &mut Playlist, state: &mut State, folder: bool) {
     let picked: Vec<PathBuf> = if folder {
         rfd::FileDialog::new()
             .pick_folder()
@@ -742,7 +763,7 @@ fn open_dialog(player: &Mpv, pl: &mut Playlist, state: &State, folder: bool) {
         return;
     }
 
-    let was_empty = pl.items.is_empty();
+    let first_new = pl.items.len();
     let n = pl.add_paths(&picked);
     if n == 0 {
         player.show_text("No playable audio or video files found");
@@ -750,16 +771,26 @@ fn open_dialog(player: &Mpv, pl: &mut Playlist, state: &State, folder: bool) {
     }
     player.show_text(&format!("Added {n} file(s)"));
     publish_playlist(pl);
-    if was_empty {
-        open_index(player, pl, state, 0);
-    }
+    // Opening files should play right away instead of waiting for the current
+    // track to finish: jump to the first newly added entry.
+    open_index(player, pl, state, first_new);
 }
 
-fn open_index(player: &Mpv, pl: &mut Playlist, _state: &State, index: usize) {
-    let Some(entry) = pl.items.get(index) else { return };
-    publish_playlist(pl);
-    let path = entry.path.clone();
+fn open_index(player: &Mpv, pl: &mut Playlist, state: &mut State, index: usize) {
+    // Remember where the outgoing track was before we switch away, so resume
+    // works when the user jumps between files (mirrors the web prototype).
+    if let Some(e) = pl.current_entry() {
+        let pos = player.time_pos();
+        let dur = player.duration();
+        if pos > 0.0 {
+            state.remember(&e.path, pos, dur);
+        }
+    }
+    let Some(path) = pl.items.get(index).map(|entry| entry.path.clone()) else {
+        return;
+    };
     pl.current = Some(index);
+    publish_playlist(pl);
     if let Err(e) = player.loadfile(&path.to_string_lossy()) {
         player.show_text(&format!("Failed to open: {e}"));
     }
@@ -847,6 +878,16 @@ mod tests {
             s = next_speed(s);
             assert!(SPEEDS.contains(&s), "{s} left the ladder");
         }
+    }
+
+    #[test]
+    fn only_natural_end_of_file_advances_the_playlist() {
+        assert!(should_advance_after_end_file(mpv::MPV_END_FILE_REASON_EOF));
+        assert!(!should_advance_after_end_file(2)); // STOP: manual stop/replacement
+        assert!(!should_advance_after_end_file(3)); // QUIT
+        assert!(!should_advance_after_end_file(mpv::MPV_END_FILE_REASON_ERROR));
+        assert!(!should_advance_after_end_file(5)); // REDIRECT
+        assert!(!should_advance_after_end_file(-1));
     }
 
     #[test]

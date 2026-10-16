@@ -42,6 +42,8 @@ WebM · OGV · RM/RMVB · 3GP · DivX · MXF
   track you can drag, and a playlist panel — both fade out while you watch and
   come back with the mouse
 - `Tab` toggles the playlist; clicking a row plays it
+- Opening or dropping new media immediately switches playback; the outgoing
+  track's position is saved for resume
 - Drag & drop files or folders; playlist with shuffle and repeat off/all/one
 - Resume where you left off, per file
 - Audio-track and subtitle-track cycling, external subtitle loading

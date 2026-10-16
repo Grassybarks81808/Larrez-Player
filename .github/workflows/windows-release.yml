@@ -3,11 +3,11 @@ name: Windows Release
 on:
   push:
     tags:
-      - v0.3.0
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Release tag (for example v0.3.0)"
+        description: "Release tag (for example v0.3.1)"
         required: true
         type: string
 
@@ -41,6 +41,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = "Stop"
+          $releaseTag = '${{ inputs.tag_name }}'
+          if ([string]::IsNullOrWhiteSpace($releaseTag)) {
+            $releaseTag = $env:GITHUB_REF_NAME
+          }
           New-Item -ItemType Directory -Force -Path dist | Out-Null
 
           # Resolve the latest upstream x86_64 developer archive through the
@@ -91,7 +95,7 @@ jobs:
           Copy-Item $builtExe "dist/Larrez-Player-Windows-x64.exe"
           Copy-Item "LICENSE" "dist/LICENSE.txt"
           @(
-            "Larrez Player v0.3.0 - Windows x64",
+            "Larrez Player $releaseTag - Windows x64",
             "",
             "Portable release. Extract every file from the ZIP into one folder, then run Larrez-Player-Windows-x64.exe.",
             "The ZIP includes mpv-2.dll, the libmpv media runtime. Keep it beside the EXE; do not move or rename it.",
@@ -190,7 +194,7 @@ jobs:
         with:
           tag_name: ${{ inputs.tag_name }}
           name: Larrez Player ${{ inputs.tag_name }}
-          target_commitish: main
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
           files: |
             dist/Larrez-Player-Windows-x64.exe
