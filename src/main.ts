@@ -143,11 +143,12 @@ function queueThumbnail(t: Track, art: HTMLElement): void {
     if (finished) return;
     if (!probe.videoWidth || !probe.videoHeight) { if (probe.readyState >= 2) fail(); return; }
     try {
-      const width = 160;
-      const height = Math.max(1, Math.round((probe.videoHeight / probe.videoWidth) * width));
-      const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = Math.min(height, 100);
+      const scale = Math.min(160 / probe.videoWidth, 100 / probe.videoHeight);
+      const width = Math.max(1, Math.round(probe.videoWidth * scale));
+      const height = Math.max(1, Math.round(probe.videoHeight * scale));
+      const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
       const ctx = canvas.getContext('2d'); if (!ctx) { fail(); return; }
-      ctx.drawImage(probe, 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(probe, 0, 0, width, height);
       finished = true; const src = canvas.toDataURL('image/jpeg', 0.72); cleanup();
       if (tracks.some((entry) => entry.id === t.id)) show(src);
     } catch { fail(); }
