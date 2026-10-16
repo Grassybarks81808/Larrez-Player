@@ -5,8 +5,8 @@
   --line: #232838;
   --text: #e8ecf4;
   --muted: #8b93a7;
-  --accent: #ff8a3d;
-  --accent-dim: #b35f27;
+  --accent: #ff2438;
+  --accent-dim: #b41429;
   --danger: #ff5c5c;
   --radius: 10px;
   font-synthesis: none;
@@ -46,7 +46,7 @@ button, select, input { font: inherit; color: inherit; }
   gap: 10px;
   padding: 16px 16px 12px;
 }
-.logo { width: 32px; height: 32px; flex: none; }
+.logo { width: 32px; height: 32px; flex: none; object-fit: contain; border-radius: 8px; }
 .brand-text { display: flex; flex-direction: column; line-height: 1.05; }
 .brand-text strong { font-size: 17px; letter-spacing: .3px; }
 .brand-text span { font-size: 11px; color: var(--muted); letter-spacing: 2.2px; text-transform: uppercase; }
@@ -63,7 +63,7 @@ button, select, input { font: inherit; color: inherit; }
   transition: background .12s, border-color .12s;
 }
 .btn:hover { background: #1e2430; border-color: #2e3549; }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: #1a0e04; font-weight: 600; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #ffffff; font-weight: 600; }
 .btn.primary:hover { background: #ff9a58; }
 
 .playlist-head {
@@ -79,7 +79,7 @@ button, select, input { font: inherit; color: inherit; }
   cursor: pointer; color: var(--muted); text-transform: none; letter-spacing: 0;
 }
 .chip:hover { color: var(--text); border-color: #39415a; }
-.chip.on { color: #1a0e04; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+.chip.on { color: #ffffff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
 .chip.danger:hover { color: var(--danger); border-color: var(--danger); }
 
 .playlist { list-style: none; margin: 0; padding: 0 8px 8px; overflow-y: auto; flex: 1; min-height: 0; }
