@@ -115,6 +115,20 @@ button, select, input { font: inherit; color: inherit; }
 #video { width: 100%; height: 100%; object-fit: contain; background: #000; display: none; }
 #stage.has-media #video { display: block; }
 #stage.has-media .dropzone { display: none; }
+.thumb {
+  position: absolute;
+  left: 14px;
+  bottom: 78px;
+  width: 160px;
+  max-height: 120px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(20,20,20,0.6);
+  box-shadow: 0 10px 24px rgba(0,0,0,0.45);
+  pointer-events: none;
+  z-index: 26;
+}
 #stage.hide-cursor { cursor: none; }
 
 .dropzone { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 20px; }
