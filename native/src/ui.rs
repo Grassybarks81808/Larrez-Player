@@ -1304,6 +1304,7 @@ mod platform {
         let l = bar_layout(hwnd);
         let s = l.scale;
         card(dc, l.pill, 26 * s);
+        draw_brand_badge(dc, l.pill, s);
 
         // Scrub: track, then what has been demuxed, then what has been played,
         // then the head. The head grows under the pointer — the only reason the
