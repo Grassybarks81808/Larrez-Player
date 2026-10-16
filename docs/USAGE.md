@@ -20,6 +20,10 @@ C++ 2015-2022 Redistributable (x64).
 - Press **O** to open files, **D** to open a folder
 - Or associate file types (below) and just double-click a video
 
+Opening or dropping new media switches to it immediately, even while another
+track is playing. When several files are selected, playback starts with the
+first newly added file and the rest stay in the playlist.
+
 ## Keyboard
 
 | Key | Action | Key | Action |

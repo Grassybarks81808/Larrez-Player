@@ -278,7 +278,7 @@ function addFiles(files: File[]): void {
     return;
   }
 
-  const startEmpty = tracks.length === 0;
+  const firstAdded = tracks.length;
   const added = media.map(trackFromFile).sort(sortByName);
   tracks.push(...added);
   renderPlaylist();
@@ -291,16 +291,19 @@ function addFiles(files: File[]): void {
   if (bad) msg += ` — ${bad} need the native build`;
   toast(msg, bad > 0);
 
-  if (startEmpty) play(0);
+  // “Open” means replace the current playback immediately, not queue the
+  // selection until the current track ends. Keep all selected files in the
+  // playlist, starting with the first one in natural sort order.
+  play(firstAdded);
 }
 
 function addUrl(url: string): void {
   const t = trackFromUrl(url);
-  const startEmpty = tracks.length === 0;
+  const index = tracks.length;
   tracks.push(t);
   renderPlaylist();
-  if (startEmpty) play(tracks.length - 1);
-  else toast(`Added ${t.name}`);
+  play(index);
+  toast(`Added ${t.name}`);
 }
 
 /* ------------------------------------------------------------------ *
