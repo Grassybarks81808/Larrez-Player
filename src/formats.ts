@@ -33,6 +33,9 @@ const MIME_BY_EXT: Record<string, string> = {
   '3gp': 'video/3gpp',
   m3u8: 'application/vnd.apple.mpegurl',
   mpd: 'application/dash+xml',
+  mp3: 'audio/mpeg', mp2: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac',
+  wav: 'audio/wav', wave: 'audio/wav', flac: 'audio/flac', opus: 'audio/ogg',
+  oga: 'audio/ogg', aif: 'audio/aiff', aiff: 'audio/aiff', wma: 'audio/x-ms-wma',
 };
 
 const CONTAINER: Record<string, string> = {
@@ -41,6 +44,9 @@ const CONTAINER: Record<string, string> = {
   ts: 'MPEG-TS', m2ts: 'MPEG-TS', flv: 'Flash Video', wmv: 'Windows Media',
   mpg: 'MPEG-PS', mpeg: 'MPEG-PS', '3gp': '3GPP',
   m3u8: 'HLS', mpd: 'DASH',
+  mp3: 'MP3 audio', mp2: 'MPEG audio', m4a: 'MPEG-4 audio', aac: 'AAC audio',
+  wav: 'WAV audio', wave: 'WAV audio', flac: 'FLAC audio', opus: 'Opus audio',
+  oga: 'Ogg audio', aif: 'AIFF audio', aiff: 'AIFF audio', wma: 'Windows Media Audio',
 };
 
 /** Containers the browser will essentially never play without a real demuxer. */
