@@ -64,11 +64,16 @@ export function mimeFor(name: string): string {
   return MIME_BY_EXT[extOf(name)] ?? '';
 }
 
-let probe: HTMLVideoElement | null = null;
+let videoProbe: HTMLVideoElement | null = null;
+let audioProbe: HTMLAudioElement | null = null;
 function canPlay(mime: string): string {
   if (!mime) return '';
-  probe ??= document.createElement('video');
-  return probe.canPlayType(mime);
+  if (mime.startsWith('audio/')) {
+    audioProbe ??= document.createElement('audio');
+    return audioProbe.canPlayType(mime);
+  }
+  videoProbe ??= document.createElement('video');
+  return videoProbe.canPlayType(mime);
 }
 
 export function inspect(name: string): FormatInfo {
