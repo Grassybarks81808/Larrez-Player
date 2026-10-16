@@ -96,7 +96,8 @@ button, select, input { font: inherit; color: inherit; }
 .pl-thumb.video { background: linear-gradient(135deg, #29303c, #11151d); }
 .pl-thumb.audio { background: linear-gradient(135deg, #39251f, #17121b); }
 .pl-thumb-glyph { font-size: 17px; line-height: 1; color: var(--accent); }
-.pl-thumb-image { display: block; width: 100%; height: 100%; object-fit: cover; }
+.pl-thumb-image { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; }
+.pl-thumb:has(.pl-thumb-image) .pl-thumb-glyph { display: none; }
 .pl-thumb:has(.pl-thumb-image) { border-color: #34303a; }
 .pl-thumb-brand { position: absolute; right: 3px; bottom: 2px; font-size: 8px; line-height: 11px; width: 11px; height: 11px; border-radius: 3px; text-align: center; font-weight: 800; color: #1a0e04; background: var(--accent); }
 .pl-idx { width: 20px; text-align: right; color: var(--muted); font-size: 11px; flex: none; font-variant-numeric: tabular-nums; }
