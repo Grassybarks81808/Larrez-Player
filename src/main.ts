@@ -110,6 +110,56 @@ function writeResume(t: Track, seconds: number): void {
  * Playlist rendering
  * ------------------------------------------------------------------ */
 let dragFrom = -1;
+const thumbnailCache = new Map<string, string>();
+const thumbnailPending = new Set<string>();
+
+function audioArtwork(): string {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#39251f"/><stop offset="1" stop-color="#17121b"/></linearGradient></defs><rect width="160" height="100" rx="10" fill="url(#g)"/><circle cx="80" cy="46" r="29" fill="#ff8a3d" opacity=".16"/><path d="M88 22v38a12 12 0 1 1-7-11V30l27-6v29a12 12 0 1 1-7-11V18z" fill="#ff8a3d"/><text x="151" y="91" text-anchor="end" font-family="Segoe UI,Arial" font-size="12" font-weight="700" fill="#ff8a3d">LARREZ</text></svg>';
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+}
+
+function queueThumbnail(t: Track, art: HTMLElement): void {
+  const show = (src: string) => {
+    thumbnailCache.set(t.id, src);
+    const img = document.createElement('img');
+    img.className = 'pl-thumb-image';
+    img.alt = '';
+    img.setAttribute('aria-hidden', 'true');
+    img.src = src;
+    art.replaceChildren(img);
+  };
+  const cached = thumbnailCache.get(t.id);
+  if (cached) { show(cached); return; }
+  if (isAudioFile(t.file ?? t.name)) { show(audioArtwork()); return; }
+  // Sample only local files: remote URLs may be cross-origin and taint canvas.
+  if (!t.file || !t.src.startsWith('blob:') || thumbnailPending.has(t.id)) return;
+  thumbnailPending.add(t.id);
+  const probe = document.createElement('video');
+  probe.preload = 'metadata'; probe.muted = true; probe.playsInline = true;
+  let finished = false;
+  const cleanup = () => { thumbnailPending.delete(t.id); probe.removeAttribute('src'); probe.load(); };
+  const fail = () => { if (finished) return; finished = true; cleanup(); };
+  const capture = () => {
+    if (finished) return;
+    if (!probe.videoWidth || !probe.videoHeight) { if (probe.readyState >= 2) fail(); return; }
+    try {
+      const width = 160;
+      const height = Math.max(1, Math.round((probe.videoHeight / probe.videoWidth) * width));
+      const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = Math.min(height, 100);
+      const ctx = canvas.getContext('2d'); if (!ctx) { fail(); return; }
+      ctx.drawImage(probe, 0, 0, canvas.width, canvas.height);
+      finished = true; const src = canvas.toDataURL('image/jpeg', 0.72); cleanup();
+      if (tracks.some((entry) => entry.id === t.id)) show(src);
+    } catch { fail(); }
+  };
+  probe.addEventListener('loadedmetadata', () => {
+    if (probe.duration > 0.5) { try { probe.currentTime = Math.min(1, probe.duration / 4); } catch { /* use first decoded frame */ } }
+  }, { once: true });
+  probe.addEventListener('seeked', capture, { once: true });
+  probe.addEventListener('loadeddata', capture, { once: true });
+  probe.addEventListener('error', fail, { once: true });
+  probe.src = t.src;
+}
 
 function renderPlaylist(): void {
   playlistEl.replaceChildren();
@@ -137,6 +187,7 @@ function renderPlaylist(): void {
     art.className = `pl-thumb ${audio ? 'audio' : 'video'}`;
     art.setAttribute('aria-hidden', 'true');
     art.innerHTML = `<span class="pl-thumb-glyph">${audio ? '♫' : '▶'}</span><span class="pl-thumb-brand">L</span>`;
+    queueThumbnail(t, art);
 
     const idx = document.createElement('span');
     idx.className = 'pl-idx';
