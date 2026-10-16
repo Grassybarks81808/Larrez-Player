@@ -35,25 +35,128 @@ jobs:
       - name: Build release executable
         run: cargo build --manifest-path native/Cargo.toml --release --target x86_64-pc-windows-msvc
 
-      - name: Package Windows executable
+      - name: Fetch x64 libmpv runtime
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+
+          # Resolve the latest upstream x86_64 developer archive through the
+          # GitHub API. The application loads libmpv dynamically at runtime.
+          $releases = gh api 'repos/shinchiro/mpv-winbuild-cmake/releases?per_page=15' | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub API request for the libmpv runtime failed (exit $LASTEXITCODE)."
+          }
+          $asset = $releases |
+            ForEach-Object { $_.assets } |
+            Where-Object { $_.name -match '^mpv-dev-x86_64-\d{8}-git-[0-9a-f]+\.7z$' } |
+            Select-Object -First 1
+          if (-not $asset) {
+            throw "No x86_64 mpv-dev runtime archive was found in the latest upstream releases."
+          }
+
+          Write-Host "Downloading $($asset.name)"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile mpv-dev.7z -UseBasicParsing
+          if (-not (Test-Path mpv-dev.7z) -or (Get-Item mpv-dev.7z).Length -lt 1MB) {
+            throw "The libmpv archive download is missing or unexpectedly small."
+          }
+          & 7z x mpv-dev.7z -ompv-dev -y | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not extract the libmpv archive (7z exit $LASTEXITCODE)."
+          }
+
+          $dll = Get-ChildItem -Path mpv-dev -Recurse -File |
+            Where-Object { $_.Name -in @('libmpv-2.dll', 'mpv-2.dll') } |
+            Select-Object -First 1
+          if (-not $dll) {
+            throw "The upstream archive did not contain libmpv-2.dll or mpv-2.dll."
+          }
+          Copy-Item $dll.FullName dist/mpv-2.dll
+          Write-Host "Bundled $($dll.Name) as dist/mpv-2.dll ($((Get-Item dist/mpv-2.dll).Length) bytes)."
+
+      - name: Package and verify Windows distribution
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $exe = "native/target/x86_64-pc-windows-msvc/release/larrez-player.exe"
-          if (!(Test-Path $exe)) {
-            throw "Expected executable was not produced: $exe"
+          $builtExe = "native/target/x86_64-pc-windows-msvc/release/larrez-player.exe"
+          if (!(Test-Path $builtExe)) {
+            throw "Expected compiled executable was not produced: $builtExe"
           }
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item $exe "dist/Larrez-Player-Windows-x64.exe"
+          if (!(Test-Path "dist/mpv-2.dll")) {
+            throw "The required libmpv runtime DLL was not packaged."
+          }
+
+          Copy-Item $builtExe "dist/Larrez-Player-Windows-x64.exe"
+          Copy-Item "LICENSE" "dist/LICENSE.txt"
           @(
-            "Larrez Player — Windows x64",
+            "Larrez Player v0.3.0 - Windows x64",
             "",
-            "Run Larrez-Player-Windows-x64.exe on 64-bit Windows.",
-            "The native player loads mpv-2.dll at runtime for media playback. If that DLL is not bundled with your distribution, install/copy a compatible mpv Windows runtime DLL beside the executable.",
+            "Portable release. Extract every file from the ZIP into one folder, then run Larrez-Player-Windows-x64.exe.",
+            "The ZIP includes mpv-2.dll, the libmpv media runtime. Keep it beside the EXE; do not move or rename it.",
+            "",
+            "Requirements: 64-bit Windows 10 or newer and a working graphics driver. No Rust toolchain or separate mpv installation is needed.",
+            "If Windows reports that a VCRUNTIME*.dll or MSVCP*.dll is missing, install the official Microsoft Visual C++ 2015-2022 Redistributable (x64): https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist",
+            "The release was smoke-tested on a Windows x64 GitHub Actions runner; GPU and driver behavior can vary by machine. Try --safe-mode if playback has graphics issues.",
+            "",
+            "The standalone EXE also requires mpv-2.dll beside it; mpv-2.dll is provided as a separate release asset.",
+            "Third-party notice: libmpv is distributed unmodified under LGPL-2.1-or-later; see LICENSE.txt and https://github.com/mpv-player/mpv.",
             "",
             "Source: https://github.com/Grassybarks81808/Larrez-Player"
           ) | Set-Content -Encoding utf8 "dist/README-Windows.txt"
-          Compress-Archive -Path "dist/Larrez-Player-Windows-x64.exe","dist/README-Windows.txt" -DestinationPath "Larrez-Player-Windows-x64.zip" -Force
+
+          function Assert-Pe64([string]$path) {
+            $bytes = [System.IO.File]::ReadAllBytes($path)
+            if ($bytes.Length -lt 512 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
+              throw "$path is not a valid PE executable or DLL."
+            }
+            $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+            if ($peOffset -lt 64 -or ($peOffset + 6) -gt $bytes.Length -or
+                $bytes[$peOffset] -ne 0x50 -or $bytes[$peOffset + 1] -ne 0x45 -or
+                $bytes[$peOffset + 2] -ne 0 -or $bytes[$peOffset + 3] -ne 0) {
+              throw "$path has no valid PE signature."
+            }
+            $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+            if ($machine -ne 0x8664) {
+              throw "$path is not an x64 PE file (machine 0x$('{0:X4}' -f $machine))."
+            }
+            Write-Host ("Verified x64 PE: {0} ({1:N0} bytes)" -f $path, $bytes.Length)
+          }
+
+          $exe = "dist/Larrez-Player-Windows-x64.exe"
+          $dll = "dist/mpv-2.dll"
+          if ((Get-Item $exe).Length -lt 200KB) {
+            throw "The executable is unexpectedly small and may not be a real build."
+          }
+          if ((Get-Item $dll).Length -lt 200KB) {
+            throw "The libmpv DLL is unexpectedly small and may not be a real runtime."
+          }
+          Assert-Pe64 $exe
+          Assert-Pe64 $dll
+
+          Compress-Archive -Path "dist/*" -DestinationPath "Larrez-Player-Windows-x64.zip" -CompressionLevel Optimal -Force
+          if (!(Test-Path "Larrez-Player-Windows-x64.zip") -or (Get-Item "Larrez-Player-Windows-x64.zip").Length -lt 1MB) {
+            throw "The portable distribution ZIP is missing or unexpectedly small."
+          }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path "Larrez-Player-Windows-x64.zip"))
+          try {
+            $entries = @($archive.Entries | ForEach-Object { $_.FullName })
+            foreach ($required in @(
+              "Larrez-Player-Windows-x64.exe",
+              "mpv-2.dll",
+              "README-Windows.txt",
+              "LICENSE.txt"
+            )) {
+              if ($entries -notcontains $required) {
+                throw "The ZIP is missing required file $required."
+              }
+            }
+          } finally {
+            $archive.Dispose()
+          }
+          Write-Host "Verified the portable ZIP contents: $($entries -join ', ')"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -61,7 +164,9 @@ jobs:
           name: Larrez-Player-Windows-x64
           path: |
             dist/Larrez-Player-Windows-x64.exe
+            dist/mpv-2.dll
             dist/README-Windows.txt
+            dist/LICENSE.txt
             Larrez-Player-Windows-x64.zip
           if-no-files-found: error
           retention-days: 30
@@ -74,7 +179,9 @@ jobs:
           generate_release_notes: true
           files: |
             dist/Larrez-Player-Windows-x64.exe
+            dist/mpv-2.dll
             dist/README-Windows.txt
+            dist/LICENSE.txt
             Larrez-Player-Windows-x64.zip
 
       - name: Create release from manual run
@@ -87,5 +194,7 @@ jobs:
           generate_release_notes: true
           files: |
             dist/Larrez-Player-Windows-x64.exe
+            dist/mpv-2.dll
             dist/README-Windows.txt
+            dist/LICENSE.txt
             Larrez-Player-Windows-x64.zip

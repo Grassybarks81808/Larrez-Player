@@ -14,10 +14,12 @@ Two builds live in this repo:
 
 ## Download for Windows
 
-Grab `LarrezPlayer-windows-x64.zip` from
+Grab `Larrez-Player-Windows-x64.zip` from
 [**Releases**](https://github.com/Grassybarks81808/Larrez-Player/releases),
-unzip anywhere, run `larrez-player.exe`. Portable — no installer, no registry
-writes. Keep `mpv-2.dll` next to the `.exe`.
+unzip anywhere, and run `Larrez-Player-Windows-x64.exe`. The ZIP includes the
+required `mpv-2.dll`; keep it beside the executable. Portable — no installer,
+no registry writes. The standalone EXE is also available, with `mpv-2.dll` as a
+separate release asset.
 
 Full instructions: [`docs/USAGE.md`](docs/USAGE.md)
 

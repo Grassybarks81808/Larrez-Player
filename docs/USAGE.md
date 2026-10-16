@@ -2,14 +2,17 @@
 
 ## Install (portable)
 
-1. Download `LarrezPlayer-windows-x64.zip` from the
-   [Releases page](https://github.com/Grassybarks81808/Larrez-Player/releases)
-   (or from the Actions run artifacts).
-2. Unzip it anywhere — a USB stick is fine. Nothing is written to
-   `Program Files` and nothing touches the registry.
-3. Run `larrez-player.exe`.
+1. Download `Larrez-Player-Windows-x64.zip` from the
+   [Releases page](https://github.com/Grassybarks81808/Larrez-Player/releases).
+2. Extract every file into one folder — a USB stick is fine. Nothing is written
+   to `Program Files` and nothing touches the registry.
+3. Run `Larrez-Player-Windows-x64.exe`.
 
-The folder must keep `mpv-2.dll` next to the `.exe` — that is the decode engine.
+The ZIP includes `mpv-2.dll`, the media engine; keep it beside the `.exe`. The
+standalone EXE release asset needs the separate `mpv-2.dll` asset in the same
+folder. The package targets 64-bit Windows 10 or newer. If Windows reports a
+missing `VCRUNTIME*.dll` or `MSVCP*.dll`, install the official Microsoft Visual
+C++ 2015-2022 Redistributable (x64).
 
 ## Playing something
 
